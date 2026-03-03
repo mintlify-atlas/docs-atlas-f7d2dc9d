@@ -1,80 +1,352 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Build and deploy your first Move smart contract on Sui in 10 minutes"
 ---
 
-## Get started in three steps
+## What You'll Build
 
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+In this quickstart, you'll:
+- Install Sui CLI and tools
+- Create your first Move package
+- Write a simple smart contract
+- Deploy to Sui devnet
+- Interact with your contract
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+This tutorial takes approximately **10 minutes** to complete.
 </Note>
+
+## Prerequisites
+
+<AccordionGroup>
+  <Accordion title="Operating System" icon="computer">
+    - Linux (Ubuntu 20.04+)
+    - macOS (12+)
+    - Windows (via WSL2)
+  </Accordion>
+
+  <Accordion title="Required Software" icon="download">
+    - **Rust** 1.75.0 or later
+    - **Git** for version control
+    - **curl** for downloading tools
+  </Accordion>
+</AccordionGroup>
+
+## Step 1: Install Sui
+
+<Steps>
+  <Step title="Install Rust">
+    If you don't have Rust installed:
+    
+    ```bash
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+    source "$HOME/.cargo/env"
+    ```
+  </Step>
+
+  <Step title="Install Sui CLI">
+    Install Sui from the main branch:
+    
+    ```bash
+    cargo install --locked --git https://github.com/MystenLabs/sui.git --branch main sui
+    ```
+    
+    This takes 5-10 minutes to compile.
+    
+    <Tip>
+    For faster installation, download pre-built binaries from the [releases page](https://github.com/MystenLabs/sui/releases).
+    </Tip>
+  </Step>
+
+  <Step title="Verify Installation">
+    ```bash
+    sui --version
+    ```
+    
+    Expected output: `sui 1.68.0` or later
+  </Step>
+
+  <Step title="Configure Sui Client">
+    Initialize your Sui configuration:
+    
+    ```bash
+    sui client
+    ```
+    
+    This creates a new keypair and connects to devnet by default.
+  </Step>
+
+  <Step title="Get Test Tokens">
+    Request SUI tokens from the devnet faucet:
+    
+    ```bash
+    sui client faucet
+    ```
+    
+    Wait ~10 seconds, then verify:
+    
+    ```bash
+    sui client balance
+    ```
+  </Step>
+</Steps>
+
+## Step 2: Create Your First Move Package
+
+<Steps>
+  <Step title="Initialize New Package">
+    ```bash
+    sui move new hello_world
+    cd hello_world
+    ```
+    
+    This creates a new Move package with this structure:
+    ```
+    hello_world/
+    ├── Move.toml
+    └── sources/
+        └── hello_world.move
+    ```
+  </Step>
+
+  <Step title="Write Your Smart Contract">
+    Open `sources/hello_world.move` and replace with:
+    
+    ```move
+    module hello_world::hello {
+        use std::string::{Self, String};
+        
+        /// A simple object that holds a message
+        public struct HelloWorld has key {
+            id: UID,
+            message: String,
+        }
+        
+        /// Create a new HelloWorld object
+        public fun create(message: vector<u8>, ctx: &mut TxContext) {
+            let hello = HelloWorld {
+                id: object::new(ctx),
+                message: string::utf8(message),
+            };
+            transfer::share_object(hello);
+        }
+        
+        /// Update the message
+        public fun update(hello: &mut HelloWorld, message: vector<u8>) {
+            hello.message = string::utf8(message);
+        }
+        
+        /// Get the current message
+        public fun get_message(hello: &HelloWorld): String {
+            hello.message
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Build the Package">
+    ```bash
+    sui move build
+    ```
+    
+    If successful, you'll see:
+    ```
+    BUILDING hello_world
+    Build Successful
+    ```
+  </Step>
+</Steps>
+
+## Step 3: Deploy to Devnet
+
+<Steps>
+  <Step title="Publish the Package">
+    ```bash
+    sui client publish --gas-budget 100000000
+    ```
+    
+    <Info>
+    The gas budget (0.1 SUI) covers the cost of publishing the package.
+    </Info>
+  </Step>
+
+  <Step title="Save Package ID">
+    After publishing, you'll see output like:
+    
+    ```
+    ╭──────────────────────────────────────────────────╮
+    │ Object Changes                                    │
+    ├──────────────────────────────────────────────────┤
+    │ Published Objects:                                │
+    │  ┌──                                             │
+    │  │ PackageID: 0xabcd1234...                      │
+    │  └──                                             │
+    ╰──────────────────────────────────────────────────╯
+    ```
+    
+    **Save this PackageID** - you'll need it to interact with your contract!
+  </Step>
+</Steps>
+
+## Step 4: Interact with Your Contract
+
+<Steps>
+  <Step title="Call the Create Function">
+    Replace `PACKAGE_ID` with your actual package ID:
+    
+    ```bash
+    sui client call \
+      --package PACKAGE_ID \
+      --module hello \
+      --function create \
+      --args "Hello, Sui!" \
+      --gas-budget 10000000
+    ```
+  </Step>
+
+  <Step title="Find the Object ID">
+    The transaction will create a new `HelloWorld` object. Look for:
+    
+    ```
+    Created Objects:
+      ┌──
+      │ ObjectID: 0x5678abcd...
+      │ Type: PACKAGE_ID::hello::HelloWorld
+      └──
+    ```
+    
+    Save this **ObjectID**.
+  </Step>
+
+  <Step title="Update the Message">
+    Update the message in your object:
+    
+    ```bash
+    sui client call \
+      --package PACKAGE_ID \
+      --module hello \
+      --function update \
+      --args OBJECT_ID "Hello from Sui blockchain!" \
+      --gas-budget 10000000
+    ```
+  </Step>
+
+  <Step title="Verify the Update">
+    Query your object to see the updated message:
+    
+    ```bash
+    sui client object OBJECT_ID
+    ```
+    
+    You'll see the object data including your message!
+  </Step>
+</Steps>
+
+## What You've Learned
+
+<CardGroup cols={2}>
+  <Card title="Move Basics" icon="code">
+    - Module structure
+    - Object definitions
+    - Public functions
+    - Shared objects
+  </Card>
+  
+  <Card title="Sui CLI" icon="terminal">
+    - Build Move packages
+    - Publish to network
+    - Call smart contract functions
+    - Query objects
+  </Card>
+  
+  <Card title="Object Model" icon="cube">
+    - Creating objects with UID
+    - Sharing objects
+    - Mutating object state
+  </Card>
+  
+  <Card title="Gas & Transactions" icon="gas-pump">
+    - Gas budgets
+    - Transaction submission
+    - Object updates
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Learn Move" icon="graduation-cap" href="/guides/your-first-move-package">
+    Deep dive into Move programming
+  </Card>
+  
+  <Card title="Build an NFT" icon="image" href="/guides/examples/nft">
+    Create and mint your first NFT
+  </Card>
+  
+  <Card title="Explore Examples" icon="folder-open" href="/guides/examples/coin">
+    Learn from complete code examples
+  </Card>
+  
+  <Card title="Use SDKs" icon="code" href="/guides/typescript-sdk">
+    Integrate with TypeScript or Rust
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Build fails with 'package not found'">
+    Ensure you're in the package directory:
+    ```bash
+    cd hello_world
+    sui move build
+    ```
+  </Accordion>
+
+  <Accordion title="Faucet request fails">
+    Try the web faucet: https://faucet.devnet.sui.io/
+    
+    Or switch environments:
+    ```bash
+    sui client switch --env testnet
+    sui client faucet
+    ```
+  </Accordion>
+
+  <Accordion title="Publish fails with 'InsufficientGas'">
+    Increase the gas budget:
+    ```bash
+    sui client publish --gas-budget 200000000
+    ```
+    
+    Or get more test tokens from the faucet.
+  </Accordion>
+
+  <Accordion title="Command not found: sui">
+    Add Cargo bin to PATH:
+    ```bash
+    export PATH="$HOME/.cargo/bin:$PATH"
+    echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Get Help
+
+<CardGroup cols={2}>
+  <Card title="Documentation" icon="book" href="/introduction">
+    Browse the full documentation
+  </Card>
+  
+  <Card title="Discord Community" icon="discord" href="https://discord.gg/sui">
+    Ask questions and get help
+  </Card>
+  
+  <Card title="GitHub" icon="github" href="https://github.com/mystenlabs/sui">
+    Explore the source code
+  </Card>
+  
+  <Card title="Examples" icon="code" href="https://github.com/MystenLabs/sui/tree/main/examples">
+    Learn from code examples
+  </Card>
+</CardGroup>
