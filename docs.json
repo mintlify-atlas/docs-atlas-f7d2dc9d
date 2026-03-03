@@ -1,122 +1,247 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Sui",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#4DA2FF",
+    "light": "#6BABFF",
+    "dark": "#0B93F6"
   },
-  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/mystenlabs/sui"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/mystenlabs/sui"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Get Started",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Introduction",
             "pages": [
-              "index",
+              "introduction",
+              "why-sui",
+              "architecture-overview"
+            ]
+          },
+          {
+            "group": "Quick Start",
+            "pages": [
+              "installation",
               "quickstart",
-              "development"
-            ]
-          },
-          {
-            "group": "Customization",
-            "pages": [
-              "essentials/settings",
-              "essentials/navigation"
-            ]
-          },
-          {
-            "group": "Writing content",
-            "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
-            ]
-          },
-          {
-            "group": "AI tools",
-            "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "first-transaction"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "Core Concepts",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Architecture",
             "pages": [
-              "api-reference/introduction"
+              "concepts/sui-architecture",
+              "concepts/consensus",
+              "concepts/validators",
+              "concepts/epochs-checkpoints"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Objects & Ownership",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "concepts/objects",
+              "concepts/ownership",
+              "concepts/dynamic-fields",
+              "concepts/object-storage"
+            ]
+          },
+          {
+            "group": "Transactions",
+            "pages": [
+              "concepts/transactions",
+              "concepts/transaction-lifecycle",
+              "concepts/gas-pricing",
+              "concepts/sponsored-transactions"
+            ]
+          },
+          {
+            "group": "Move Language",
+            "pages": [
+              "concepts/move-overview",
+              "concepts/move-modules",
+              "concepts/move-functions",
+              "concepts/move-abilities"
+            ]
+          },
+          {
+            "group": "Tokenomics",
+            "pages": [
+              "concepts/sui-token",
+              "concepts/gas-mechanism",
+              "concepts/staking",
+              "concepts/storage-fund"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Developer Guides",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "guides/setup-dev-environment",
+              "guides/your-first-move-package",
+              "guides/testing-move-code"
+            ]
+          },
+          {
+            "group": "Move Development",
+            "pages": [
+              "guides/move-packages",
+              "guides/custom-objects",
+              "guides/shared-objects",
+              "guides/events",
+              "guides/capability-pattern",
+              "guides/upgrade-packages"
+            ]
+          },
+          {
+            "group": "Client Integration",
+            "pages": [
+              "guides/rust-sdk",
+              "guides/typescript-sdk",
+              "guides/connect-to-network",
+              "guides/query-blockchain",
+              "guides/build-transactions",
+              "guides/sign-submit-transactions"
+            ]
+          },
+          {
+            "group": "Advanced Topics",
+            "pages": [
+              "guides/programmable-transactions",
+              "guides/zklogin",
+              "guides/multisig",
+              "guides/sponsored-txns",
+              "guides/indexing-data"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "guides/examples/coin",
+              "guides/examples/nft",
+              "guides/examples/defi",
+              "guides/examples/gaming"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Node Operators",
+        "groups": [
+          {
+            "group": "Running Nodes",
+            "pages": [
+              "operators/fullnode-setup",
+              "operators/validator-setup",
+              "operators/system-requirements",
+              "operators/node-configuration"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operators/monitoring",
+              "operators/updates-maintenance",
+              "operators/snapshots",
+              "operators/troubleshooting"
+            ]
+          },
+          {
+            "group": "Validator Guide",
+            "pages": [
+              "operators/validator-requirements",
+              "operators/staking-rewards",
+              "operators/validator-operations",
+              "operators/committee-management"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "cli/overview",
+              "cli/installation"
+            ]
+          },
+          {
+            "group": "Commands",
+            "pages": [
+              "cli/client",
+              "cli/move",
+              "cli/keytool",
+              "cli/validator",
+              "cli/genesis",
+              "cli/start"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "JSON-RPC API",
+            "pages": [
+              "api/json-rpc-overview",
+              "api/read-api",
+              "api/write-api",
+              "api/coin-read-api",
+              "api/event-api",
+              "api/governance-api",
+              "api/transaction-builder-api"
+            ]
+          },
+          {
+            "group": "Rust SDK",
+            "pages": [
+              "api/rust-sdk/overview",
+              "api/rust-sdk/client",
+              "api/rust-sdk/transaction-builder",
+              "api/rust-sdk/types"
+            ]
+          },
+          {
+            "group": "GraphQL API",
+            "pages": [
+              "api/graphql/overview",
+              "api/graphql/queries",
+              "api/graphql/subscriptions"
+            ]
+          },
+          {
+            "group": "Framework",
+            "pages": [
+              "api/move-framework/sui-framework",
+              "api/move-framework/move-stdlib",
+              "api/move-framework/deepbook"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

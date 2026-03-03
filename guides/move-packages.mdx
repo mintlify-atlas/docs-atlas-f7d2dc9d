@@ -1,0 +1,425 @@
+---
+title: Move Package Structure
+description: Understand the structure and organization of Move packages on Sui
+---
+
+Move packages are the fundamental unit of code organization on Sui. Understanding their structure is essential for building well-organized smart contracts.
+
+## Package Anatomy
+
+A typical Move package has this structure:
+
+```
+my_package/
+├── Move.toml          # Package manifest
+├── sources/           # Move source files
+│   ├── module1.move
+│   └── module2.move
+├── tests/             # Test files (optional)
+│   └── module1_tests.move
+└── examples/          # Example code (optional)
+    └── usage.move
+```
+
+## Move.toml Manifest
+
+The `Move.toml` file defines package metadata, dependencies, and addresses.
+
+### Basic Structure
+
+From the `coin` example in the Sui codebase:
+
+```toml
+[package]
+name = "Coins"
+version = "0.0.1"
+edition = "2024.beta"
+
+[dependencies]
+Sui = { local = "../../../crates/sui-framework/packages/sui-framework" }
+
+[addresses]
+examples = "0x0"
+```
+
+### Package Section
+
+```toml
+[package]
+name = "my_package"        # Package name
+version = "1.0.0"          # Semantic version
+edition = "2024.beta"      # Move edition
+```
+
+### Dependencies
+
+#### Local dependencies
+
+```toml
+[dependencies]
+Sui = { local = "../sui-framework" }
+MyLib = { local = "../my_lib" }
+```
+
+#### Git dependencies
+
+```toml
+[dependencies]
+Sui = { 
+    git = "https://github.com/MystenLabs/sui.git", 
+    subdir = "crates/sui-framework/packages/sui-framework",
+    rev = "framework/mainnet" 
+}
+```
+
+### Address Aliases
+
+Define named addresses for your package:
+
+```toml
+[addresses]
+my_package = "0x0"  # Placeholder, assigned at publish
+admin = "0x1234..."  # Fixed address
+```
+
+In your code:
+
+```move
+module my_package::example {
+    // my_package is resolved from Move.toml
+}
+```
+
+## Module Structure
+
+Modules are the building blocks of Move packages.
+
+### Basic Module
+
+```move
+module package_name::module_name {
+    // Imports
+    use sui::object::{Self, UID};
+    use sui::transfer;
+
+    // Constants
+    const MAX_SUPPLY: u64 = 1000000;
+    const ENotAuthorized: u64 = 0;
+
+    // Structs
+    public struct MyObject has key {
+        id: UID,
+        value: u64,
+    }
+
+    // Functions
+    public fun create(value: u64, ctx: &mut TxContext): MyObject {
+        MyObject {
+            id: object::new(ctx),
+            value,
+        }
+    }
+
+    // Tests
+    #[test]
+    fun test_create() {
+        // Test code
+    }
+}
+```
+
+### Module Initializer
+
+The `init` function runs once when the package is published:
+
+```move
+module my_package::example {
+    public struct AdminCap has key {
+        id: UID,
+    }
+
+    // Called once at publish time
+    fun init(ctx: &mut TxContext) {
+        let admin_cap = AdminCap {
+            id: object::new(ctx),
+        };
+        transfer::transfer(admin_cap, ctx.sender());
+    }
+}
+```
+
+## Organizing Code
+
+### Single vs Multiple Modules
+
+**Single module** - Simple packages:
+
+```
+sources/
+└── nft.move
+```
+
+**Multiple modules** - Complex packages:
+
+```
+sources/
+├── nft.move           # Main NFT logic
+├── marketplace.move   # Trading functionality  
+├── royalties.move     # Royalty management
+└── utils.move         # Shared utilities
+```
+
+### Module Visibility
+
+#### Public modules
+
+Expose functionality to other packages:
+
+```move
+module my_package::public_api {
+    public fun do_something() { /* ... */ }
+}
+```
+
+#### Internal modules
+
+Keep implementation details private:
+
+```move
+module my_package::internal {
+    // Only accessible within my_package
+    public(package) fun helper_function() { /* ... */ }
+}
+```
+
+## Friend Declarations
+
+Allow specific modules to access package-private functions:
+
+```move
+module my_package::core {
+    // Declare friends
+    friend my_package::admin;
+    friend my_package::marketplace;
+
+    // Only friends can call this
+    public(package) fun privileged_operation() {
+        // ...
+    }
+}
+
+module my_package::admin {
+    use my_package::core;
+
+    public fun admin_action() {
+        core::privileged_operation(); // Allowed
+    }
+}
+```
+
+## Code Organization Patterns
+
+### Pattern 1: Core + Extensions
+
+```
+sources/
+├── core.move       # Core data structures
+├── admin.move      # Admin functions
+├── user.move       # User-facing functions
+└── events.move     # Event definitions
+```
+
+### Pattern 2: Feature-Based
+
+```
+sources/
+├── token.move           # Token implementation
+├── staking.move         # Staking logic
+├── governance.move      # Governance
+└── treasury.move        # Treasury management
+```
+
+### Pattern 3: Layer-Based
+
+```
+sources/
+├── storage.move    # Data layer
+├── logic.move      # Business logic
+└── api.move        # Public API
+```
+
+## Real Example: Coin Package
+
+From `examples/move/coin`:
+
+```
+coin/
+├── Move.toml
+└── sources/
+    ├── my_coin.move              # Basic coin
+    ├── fixed_supply.move         # Fixed supply coin
+    ├── deflationary_supply.move  # Deflationary coin
+    └── regcoin.move              # Regulated coin
+```
+
+### my_coin.move
+
+```move
+module examples::my_coin {
+    use sui::coin::{Self, TreasuryCap};
+
+    public struct MY_COIN has drop {}
+
+    fun init(witness: MY_COIN, ctx: &mut TxContext) {
+        let (treasury, metadata) = coin::create_currency(
+            witness,
+            6,              // decimals
+            b"MY_COIN",     // symbol
+            b"",            // name
+            b"",            // description
+            option::none(), // icon_url
+            ctx,
+        );
+        transfer::public_freeze_object(metadata);
+        transfer::public_transfer(treasury, ctx.sender())
+    }
+
+    public fun mint(
+        treasury_cap: &mut TreasuryCap<MY_COIN>,
+        amount: u64,
+        recipient: address,
+        ctx: &mut TxContext,
+    ) {
+        let coin = coin::mint(treasury_cap, amount, ctx);
+        transfer::public_transfer(coin, recipient)
+    }
+}
+```
+
+## Building Packages
+
+### Build command
+
+```bash
+sui move build
+```
+
+### Build with docs
+
+```bash
+sui move build --doc
+```
+
+### Check dependencies
+
+```bash
+sui move build --fetch-deps-only
+```
+
+## Publishing Packages
+
+### Publish to network
+
+```bash
+sui client publish --gas-budget 100000000
+```
+
+### Publish with custom addresses
+
+Update `Move.toml`:
+
+```toml
+[addresses]
+my_package = "0x<address>"
+```
+
+Then publish:
+
+```bash
+sui client publish --gas-budget 100000000
+```
+
+## Package Upgrades
+
+Sui supports package upgrades. See the [Upgrade Packages](/guides/upgrade-packages) guide for details.
+
+### Upgrade policies
+
+- **Compatible**: Only add new functions/structs
+- **Additive**: Can add abilities to structs
+- **Incompatible**: Breaking changes
+
+## Best Practices
+
+### 1. One concern per module
+
+Keep modules focused:
+
+```move
+// Good
+module my_package::user_profile { /* ... */ }
+module my_package::user_badges { /* ... */ }
+
+// Avoid
+module my_package::everything { /* ... */ }
+```
+
+### 2. Use clear naming
+
+```move
+module defi_protocol::liquidity_pool { /* ... */ }
+module defi_protocol::swap_router { /* ... */ }
+```
+
+### 3. Organize imports
+
+```move
+module my_package::example {
+    // Standard library
+    use std::string;
+    use std::vector;
+
+    // Sui framework
+    use sui::object::{Self, UID};
+    use sui::transfer;
+    use sui::tx_context::TxContext;
+
+    // Package imports
+    use my_package::utils;
+    use my_package::events;
+}
+```
+
+### 4. Document public APIs
+
+```move
+/// Create a new NFT with the given attributes.
+/// 
+/// # Arguments
+/// * `name` - The NFT name
+/// * `description` - The NFT description
+/// * `url` - The image URL
+public fun mint_nft(
+    name: vector<u8>,
+    description: vector<u8>,
+    url: vector<u8>,
+    ctx: &mut TxContext
+): NFT {
+    // Implementation
+}
+```
+
+### 5. Version your packages
+
+```toml
+[package]
+name = "my_package"
+version = "1.2.0"  # Use semantic versioning
+```
+
+## Next Steps
+
+- [Create custom objects](/guides/custom-objects)
+- [Learn about shared objects](/guides/shared-objects)
+- [Understand events](/guides/events)
+- [Implement capability patterns](/guides/capability-pattern)

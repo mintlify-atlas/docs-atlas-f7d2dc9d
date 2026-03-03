@@ -1,0 +1,316 @@
+---
+title: EventApi
+description: Query and subscribe to on-chain events
+---
+
+The EventApi provides methods for querying historical events and subscribing to real-time event streams. Methods are in the `sui` and `suix` namespaces.
+
+## Event Queries
+
+### getEvents (sui namespace)
+
+Returns events emitted by a specific transaction.
+
+<ParamField path="transaction_digest" type="TransactionDigest" required>
+  The transaction digest
+</ParamField>
+
+<ResponseField name="result" type="SuiEvent[]">
+  Array of events emitted by the transaction
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "sui_getEvents",
+    "params": [
+      "7nPJKfZTx2YWqZWW3A8cXnFQVFQs7FKqBZqXU6qz5K4Q"
+    ]
+  }'
+```
+
+---
+
+### queryEvents (suix namespace)
+
+Returns a paginated list of events matching the specified filter.
+
+<ParamField path="query" type="EventFilter" required>
+  The event query criteria. See Event Filters section below
+</ParamField>
+
+<ParamField path="cursor" type="EventID">
+  Optional paging cursor
+</ParamField>
+
+<ParamField path="limit" type="usize">
+  Maximum number of items per page
+</ParamField>
+
+<ParamField path="descending_order" type="boolean">
+  Query result ordering (false = ascending, oldest first)
+</ParamField>
+
+<ResponseField name="result" type="EventPage">
+  Paginated event results
+  
+  <Expandable title="response fields">
+    <ResponseField name="data" type="SuiEvent[]">Array of events</ResponseField>
+    <ResponseField name="nextCursor" type="EventID">Cursor for next page</ResponseField>
+    <ResponseField name="hasNextPage" type="boolean">Whether more results exist</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_queryEvents",
+    "params": [
+      {
+        "MoveEventType": "0x2::coin::CoinCreated<0x2::sui::SUI>"
+      },
+      null,
+      10,
+      false
+    ]
+  }'
+```
+
+## Event Subscriptions
+
+### subscribeEvent (WebSocket only)
+
+Subscribes to a stream of Sui events matching the filter.
+
+<Warning>
+  Event subscriptions are only available through WebSocket connections.
+</Warning>
+
+<ParamField path="filter" type="EventFilter" required>
+  The filter criteria for the event stream
+</ParamField>
+
+<ResponseField name="subscription" type="Subscription<SuiEvent>">
+  Stream of matching events
+</ResponseField>
+
+```javascript
+const WebSocket = require('ws');
+const ws = new WebSocket('wss://fullnode.mainnet.sui.io:443');
+
+ws.on('open', () => {
+  // Subscribe to all events
+  ws.send(JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'suix_subscribeEvent',
+    params: [{ All: [] }]
+  }));
+});
+
+ws.on('message', (data) => {
+  const event = JSON.parse(data);
+  console.log('Event:', event);
+});
+```
+
+## Event Filters
+
+Event filters allow you to query specific types of events:
+
+### All Events
+
+```json
+{ "All": [] }
+```
+
+### By Transaction Digest
+
+```json
+{
+  "Transaction": "7nPJKfZTx2YWqZWW3A8cXnFQVFQs7FKqBZqXU6qz5K4Q"
+}
+```
+
+### By Move Event Type
+
+```json
+{
+  "MoveEventType": "0x2::coin::CoinCreated<0x2::sui::SUI>"
+}
+```
+
+### By Move Module
+
+```json
+{
+  "MoveModule": {
+    "package": "0x2",
+    "module": "coin"
+  }
+}
+```
+
+### By Sender Address
+
+```json
+{
+  "Sender": "0x..."
+}
+```
+
+### By Package
+
+```json
+{
+  "Package": "0x2"
+}
+```
+
+### By Object
+
+```json
+{
+  "Object": "0x..."
+}
+```
+
+### Time Range
+
+```json
+{
+  "TimeRange": {
+    "start_time": "1234567890000",
+    "end_time": "1234567899999"
+  }
+}
+```
+
+### Combined Filters (AND)
+
+```json
+{
+  "And": [
+    { "Package": "0x2" },
+    { "MoveModule": { "package": "0x2", "module": "coin" } }
+  ]
+}
+```
+
+### Combined Filters (OR)
+
+```json
+{
+  "Or": [
+    { "Sender": "0x..." },
+    { "Sender": "0x..." }
+  ]
+}
+```
+
+## Event Structure
+
+Each `SuiEvent` contains:
+
+```typescript
+interface SuiEvent {
+  id: EventID;           // Unique event identifier
+  packageId: ObjectID;   // Package that emitted the event
+  transactionModule: string; // Module name
+  sender: SuiAddress;    // Transaction sender
+  type: string;          // Move event type
+  parsedJson: object;    // Parsed event data
+  bcs: string;           // BCS-encoded event data
+  timestampMs: string;   // Event timestamp
+}
+```
+
+## Usage Examples
+
+### Rust SDK - Query Events
+
+```rust
+use sui_sdk::SuiClientBuilder;
+use sui_json_rpc_types::EventFilter;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default()
+        .build("https://fullnode.mainnet.sui.io:443")
+        .await?;
+    
+    // Query events by Move type
+    let events = sui.event_api()
+        .query_events(
+            EventFilter::MoveEventType(
+                "0x2::coin::CoinCreated<0x2::sui::SUI>".to_string()
+            ),
+            None,
+            Some(10),
+            false
+        )
+        .await?;
+    
+    for event in events.data {
+        println!("Event: {:?}", event.parsed_json);
+    }
+    
+    Ok(())
+}
+```
+
+### Rust SDK - Subscribe to Events
+
+```rust
+use sui_sdk::SuiClientBuilder;
+use sui_json_rpc_types::EventFilter;
+use futures::StreamExt;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default()
+        .ws_url("wss://fullnode.mainnet.sui.io:443")
+        .build("https://fullnode.mainnet.sui.io:443")
+        .await?;
+    
+    let mut subscribe_all = sui.event_api()
+        .subscribe_event(EventFilter::All(vec![]))
+        .await?;
+    
+    while let Some(event) = subscribe_all.next().await {
+        match event {
+            Ok(e) => println!("Event: {:?}", e),
+            Err(err) => eprintln!("Error: {}", err),
+        }
+    }
+    
+    Ok(())
+}
+```
+
+### TypeScript SDK - Subscribe to Events
+
+```typescript
+import { SuiClient } from '@mysten/sui.js/client';
+
+const client = new SuiClient({
+  url: 'https://fullnode.mainnet.sui.io:443',
+});
+
+// Subscribe to events
+const unsubscribe = await client.subscribeEvent({
+  filter: { MoveEventType: '0x2::coin::CoinCreated<0x2::sui::SUI>' },
+  onMessage: (event) => {
+    console.log('Event:', event);
+  },
+});
+
+// Unsubscribe later
+// unsubscribe();
+```

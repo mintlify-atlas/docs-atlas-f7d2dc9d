@@ -1,0 +1,337 @@
+---
+title: SUI Token Explained
+description: Learn about the SUI token, its role in the Sui ecosystem, and its tokenomics.
+---
+
+SUI is the native token of the Sui blockchain, serving multiple critical functions in the ecosystem. Understanding SUI's mechanics and use cases is essential for participating in the Sui network.
+
+## SUI Token Functions
+
+<CardGroup cols={2}>
+  <Card title="Gas Payment" icon="gas-pump">
+    Pay for transaction fees and storage costs
+  </Card>
+  <Card title="Staking" icon="coins">
+    Stake to validators to participate in consensus
+  </Card>
+  <Card title="Governance" icon="balance-scale">
+    Participate in on-chain governance decisions
+  </Card>
+  <Card title="Medium of Exchange" icon="money-bill-transfer">
+    Use as currency in the Sui ecosystem
+  </Card>
+</CardGroup>
+
+## Token Denomination
+
+SUI uses MIST as its smallest unit:
+
+```
+1 SUI = 1,000,000,000 MIST (10^9)
+```
+
+<Note>
+  All on-chain amounts are denominated in MIST. The human-readable SUI amount is MIST / 1,000,000,000.
+</Note>
+
+## SUI as a Coin
+
+SUI is implemented as a native coin type:
+
+```move filename="crates/sui-framework/packages/sui-framework/sources/coin.move"
+public struct Coin<phantom T> has key, store {
+    id: UID,
+    balance: Balance<T>,
+}
+```
+
+The gas coin is a special `Coin<SUI>` object:
+
+```rust filename="crates/sui-types/src/object.rs"
+pub fn new_gas_coin(version: SequenceNumber, id: ObjectID, value: u64) -> Self {
+    unsafe {
+        Self::new_from_execution_with_limit(
+            GasCoin::type_().into(),
+            true,
+            version,
+            GasCoin::new(id, value).to_bcs_bytes(),
+            256,
+        )
+        .unwrap()
+    }
+}
+```
+
+## Total Supply
+
+SUI has a fixed maximum supply of 10 billion tokens:
+
+```
+Max Supply: 10,000,000,000 SUI
+```
+
+### Distribution
+
+The tokens are distributed across different allocations:
+
+<Tabs>
+  <Tab title="Community Reserve">
+    Allocated for community programs, grants, and ecosystem development.
+  </Tab>
+  
+  <Tab title="Early Contributors">
+    Team members and early contributors with vesting schedules.
+  </Tab>
+  
+  <Tab title="Investors">
+    Private sale participants with lock-up and vesting periods.
+  </Tab>
+  
+  <Tab title="Mysten Labs Treasury">
+    Reserved for ongoing development and operations.
+  </Tab>
+  
+  <Tab title="Community Access Program">
+    Distributed through community sale events.
+  </Tab>
+</Tabs>
+
+## Token Release Schedule
+
+SUI tokens are released over time through:
+
+<Steps>
+  <Step title="Staking Rewards">
+    New tokens minted as staking rewards each epoch
+  </Step>
+  <Step title="Vesting Schedules">
+    Locked tokens released according to vesting timelines
+  </Step>
+  <Step title="Storage Fund Returns">
+    SUI returned when objects are deleted
+  </Step>
+</Steps>
+
+## Using SUI in Transactions
+
+### Splitting Coins
+
+```typescript
+import { Transaction } from '@mysten/sui/transactions';
+
+const tx = new Transaction();
+
+// Split 1 SUI into separate coin
+const [coin] = tx.splitCoins(tx.gas, [1_000_000_000]); // 1 SUI in MIST
+
+tx.transferObjects([coin], recipient);
+```
+
+### Merging Coins
+
+```typescript
+const tx = new Transaction();
+
+// Merge all coins into primary coin
+tx.mergeCoins(primaryCoin, [coin1, coin2, coin3]);
+```
+
+### Getting Balance
+
+```typescript
+const balance = await client.getBalance({
+    owner: address,
+    coinType: '0x2::sui::SUI',
+});
+
+console.log(`Balance: ${Number(balance.totalBalance) / 1e9} SUI`);
+```
+
+## Gas Coin Selection
+
+Sui automatically selects gas coins for transactions:
+
+```typescript
+const tx = new Transaction();
+// Gas coin automatically selected from sender's balance
+tx.setGasBudget(10_000_000);
+```
+
+You can also specify gas coins manually:
+
+```typescript
+tx.setGasPayment([
+    {
+        objectId: coinId1,
+        version: version1,
+        digest: digest1,
+    },
+    {
+        objectId: coinId2,
+        version: version2,
+        digest: digest2,
+    },
+]);
+```
+
+## SUI in Smart Contracts
+
+### Receiving SUI Payments
+
+```move
+use sui::coin::{Self, Coin};
+use sui::sui::SUI;
+
+public fun pay_fee(payment: Coin<SUI>) {
+    let amount = payment.value();
+    assert!(amount >= MINIMUM_FEE, EInsufficientPayment);
+    
+    // Process payment
+    transfer::public_transfer(payment, TREASURY_ADDRESS);
+}
+```
+
+### Splitting SUI
+
+```move
+use sui::coin::{Self, Coin};
+use sui::sui::SUI;
+
+public fun split_payment(
+    coin: &mut Coin<SUI>,
+    amount: u64,
+    ctx: &mut TxContext,
+) {
+    let split_coin = coin.split(amount, ctx);
+    transfer::public_transfer(split_coin, recipient);
+}
+```
+
+### Minting (Not Possible)
+
+<Warning>
+  SUI cannot be minted arbitrarily. New SUI only enters circulation through:
+  - Staking rewards (controlled by the protocol)
+  - Vesting schedules (predetermined allocations)
+  - Storage rebates (returning previously paid fees)
+</Warning>
+
+## Economic Properties
+
+### Deflationary Mechanisms
+
+1. **Storage Fees**: Part of storage fees goes to non-refundable fund
+2. **Burned Fees**: Certain operations may burn SUI
+3. **Lost Keys**: Inaccessible wallets effectively reduce circulating supply
+
+### Inflationary Mechanisms
+
+1. **Staking Rewards**: New SUI issued to validators and stakers
+2. **Subsidies**: Temporary subsidies for network bootstrapping
+
+## Token Utility
+
+### As Gas
+
+```typescript
+// Every transaction requires SUI for gas
+const tx = new Transaction();
+tx.moveCall({
+    target: `${packageId}::module::function`,
+    arguments: [/* ... */],
+});
+tx.setGasBudget(10_000_000); // SUI required
+```
+
+### As Stake
+
+```move filename="crates/sui-framework/packages/sui-system/sources/staking_pool.move"
+public(package) fun request_add_stake(
+    pool: &mut StakingPool,
+    stake: Balance<SUI>,
+    stake_activation_epoch: u64,
+    ctx: &mut TxContext,
+): StakedSui {
+    let sui_amount = stake.value();
+    assert!(!pool.is_inactive(), EDelegationToInactivePool);
+    assert!(sui_amount > 0, EDelegationOfZeroSui);
+
+    pool.pending_stake = pool.pending_stake + sui_amount;
+    StakedSui {
+        id: object::new(ctx),
+        pool_id: object::id(pool),
+        stake_activation_epoch,
+        principal: stake,
+    }
+}
+```
+
+### As Payment
+
+```move
+public fun purchase_item(
+    payment: Coin<SUI>,
+    item_id: ID,
+    shop: &mut Shop,
+) {
+    let item = shop.items.remove(&item_id);
+    let price = item.price;
+    
+    assert!(payment.value() >= price, EInsufficientPayment);
+    
+    // Handle payment
+    transfer::public_transfer(payment, shop.owner);
+    transfer::public_transfer(item, tx_context::sender(ctx));
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always use MIST for on-chain values">
+    ```move
+    // Bad: Using decimal SUI values
+    const PRICE: u64 = 1; // Unclear if this is 1 SUI or 1 MIST
+    
+    // Good: Explicit MIST values
+    const PRICE_MIST: u64 = 1_000_000_000; // 1 SUI in MIST
+    ```
+  </Accordion>
+  
+  <Accordion title="Handle coin splits properly">
+    ```typescript
+    // Ensure enough balance before splitting
+    const balance = await client.getBalance({ owner: address });
+    if (BigInt(balance.totalBalance) < amount) {
+        throw new Error('Insufficient balance');
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Consider gas costs">
+    ```typescript
+    // Estimate gas before execution
+    const dryRun = await client.dryRunTransactionBlock({
+        transactionBlock: await tx.build({ client }),
+    });
+    
+    const totalCost = BigInt(dryRun.effects.gasUsed.computationCost) +
+                      BigInt(dryRun.effects.gasUsed.storageCost) -
+                      BigInt(dryRun.effects.gasUsed.storageRebate);
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="Gas Mechanism" href="/concepts/gas-mechanism" icon="gas-pump">
+    Understand gas costs
+  </Card>
+  <Card title="Staking" href="/concepts/staking" icon="coins">
+    Learn about staking SUI
+  </Card>
+  <Card title="Storage Fund" href="/concepts/storage-fund" icon="vault">
+    Storage economics
+  </Card>
+</CardGroup>

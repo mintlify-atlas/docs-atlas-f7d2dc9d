@@ -1,0 +1,334 @@
+---
+title: Storage Fund Explained
+description: Understand Sui's storage fund mechanism that ensures long-term sustainability of on-chain storage.
+---
+
+The storage fund is a key innovation in Sui's economic model, designed to make on-chain storage economically sustainable in the long term by creating a pay-for-what-you-use model.
+
+## How the Storage Fund Works
+
+The storage fund maintains a balance that represents the cost of storing all current on-chain objects:
+
+```move filename="crates/sui-framework/packages/sui-system/sources/storage_fund.move"
+/// Struct representing the storage fund, containing two `Balance`s:
+/// - `total_object_storage_rebates` has the invariant that it's the sum of `storage_rebate` of
+///    all objects currently stored on-chain.
+/// - `non_refundable_balance` contains any remaining inflow of the storage fund that should not
+///    be taken out of the fund.
+public struct StorageFund has store {
+    total_object_storage_rebates: Balance<SUI>,
+    non_refundable_balance: Balance<SUI>,
+}
+```
+
+## Two Components
+
+<CardGroup cols={2}>
+  <Card title="Total Object Storage Rebates" icon="database">
+    Sum of storage rebates for all active objects. Flows in when objects are created, flows out when deleted.
+  </Card>
+  <Card title="Non-Refundable Balance" icon="lock">
+    Permanent fund from non-refundable fees and other inflows. Used for long-term storage sustainability.
+  </Card>
+</CardGroup>
+
+## Storage Fund Lifecycle
+
+### Object Creation
+
+<Steps>
+  <Step title="User pays storage cost">
+    Based on object size: `size_bytes × storage_price_per_byte`
+  </Step>
+  <Step title="Charge added to storage fund">
+    Full amount goes into `total_object_storage_rebates`
+  </Step>
+  <Step title="Rebate associated with object">
+    Object carries rebate value for future deletion
+  </Step>
+</Steps>
+
+### Object Deletion
+
+<Steps>
+  <Step title="Split rebate">
+    Separate into refundable and non-refundable portions
+  </Step>
+  <Step title="Non-refundable fee to fund">
+    Small percentage stays in `non_refundable_balance`
+  </Step>
+  <Step title="Refundable portion to user">
+    Majority returned to transaction sender
+  </Step>
+</Steps>
+
+## Epoch Processing
+
+```move filename="crates/sui-framework/packages/sui-system/sources/storage_fund.move"
+public(package) fun advance_epoch(
+    self: &mut StorageFund,
+    storage_charges: Balance<SUI>,
+    storage_fund_reinvestment: Balance<SUI>,
+    leftover_staking_rewards: Balance<SUI>,
+    storage_rebate_amount: u64,
+    non_refundable_storage_fee_amount: u64,
+): Balance<SUI> {
+    // Both the reinvestment and leftover rewards are not to be refunded
+    self.non_refundable_balance.join(storage_fund_reinvestment);
+    self.non_refundable_balance.join(leftover_staking_rewards);
+
+    // Storage charges go into total rebates pool
+    self.total_object_storage_rebates.join(storage_charges);
+
+    // Split out non-refundable portion of storage rebate
+    let non_refundable_storage_fee = self
+        .total_object_storage_rebates
+        .split(non_refundable_storage_fee_amount);
+    
+    self.non_refundable_balance.join(non_refundable_storage_fee);
+
+    // Return refundable portion to be burned
+    let storage_rebate = self.total_object_storage_rebates.split(storage_rebate_amount);
+    storage_rebate
+}
+```
+
+## Economic Flow
+
+```
+User Creates Object
+    ↓
+  [Pay Storage Cost]
+    ↓
+  Storage Fund
+    │
+    ├─> total_object_storage_rebates (refundable)
+    │
+    └─> non_refundable_balance (permanent)
+         ↑
+         ├─ Non-refundable fees
+         ├─ Staking reward overflow
+         └─ Storage fund reinvestment
+
+User Deletes Object
+    ↓
+  [Process Rebate]
+    │
+    ├─> Refund to User (most of rebate)
+    │
+    └─> Non-refundable fee (to fund)
+```
+
+## Querying Storage Fund
+
+```move filename="crates/sui-framework/packages/sui-system/sources/storage_fund.move"
+public fun total_object_storage_rebates(self: &StorageFund): u64 {
+    self.total_object_storage_rebates.value()
+}
+
+public fun total_balance(self: &StorageFund): u64 {
+    self.total_object_storage_rebates.value() + self.non_refundable_balance.value()
+}
+```
+
+## Why This Matters
+
+<Tabs>
+  <Tab title="Sustainability">
+    Traditional blockchains face a tragedy of the commons:
+    - Validators must store all data forever
+    - Users pay once but impose perpetual costs
+    - System becomes unsustainable
+    
+    Sui's solution:
+    - Users essentially "rent" storage
+    - Deleting data returns most of the cost
+    - Long-term costs covered by non-refundable fees
+  </Tab>
+  
+  <Tab title="Incentives">
+    The storage fund creates healthy incentives:
+    
+    **For Users:**
+    - Clean up unused data to recover funds
+    - Think carefully about what to store on-chain
+    - Use dynamic fields for optional data
+    
+    **For Developers:**
+    - Design efficient data structures
+    - Store large data off-chain (IPFS, Arweave)
+    - Implement cleanup mechanisms
+  </Tab>
+  
+  <Tab title="Scalability">
+    By making storage costs explicit and recoverable:
+    - Prevents unbounded state growth
+    - Validators can plan storage costs
+    - Network remains economically viable long-term
+  </Tab>
+</Tabs>
+
+## Example: Object Lifecycle
+
+```move
+// Create object (user pays storage)
+public fun create(ctx: &mut TxContext) {
+    let obj = MyObject {
+        id: object::new(ctx),
+        data: vector[/* 1KB of data */],
+    };
+    // User charged: 1024 bytes × storage_price
+    // This amount held in storage fund as rebate
+    transfer::transfer(obj, ctx.sender());
+}
+
+// Delete object (user gets rebate)
+public fun cleanup(obj: MyObject) {
+    let MyObject { id, data: _ } = obj;
+    id.delete();
+    // User receives: ~95% of original storage cost
+    // Storage fund keeps: ~5% as non-refundable fee
+}
+```
+
+## Impact on Gas Costs
+
+Storage costs are separate from computation:
+
+```rust filename="crates/sui-types/src/gas.rs"
+pub struct GasCostSummary {
+    pub computation_cost: u64,      // CPU/network
+    pub storage_cost: u64,          // New storage
+    pub storage_rebate: u64,        // Deleted storage
+    pub non_refundable_storage_fee: u64,  // To storage fund
+}
+
+// Total user pays:
+// computation_cost + storage_cost - storage_rebate
+```
+
+## Storage Fund Inflows and Outflows
+
+### Inflows
+
+<AccordionGroup>
+  <Accordion title="Storage Charges">
+    Fees paid when creating or expanding objects
+  </Accordion>
+  
+  <Accordion title="Non-Refundable Fees">
+    Portion of storage rebates kept by the system
+  </Accordion>
+  
+  <Accordion title="Staking Reward Overflow">
+    Excess staking rewards beyond distribution needs
+  </Accordion>
+  
+  <Accordion title="Storage Fund Reinvestment">
+    Returns from fund investments (if implemented)
+  </Accordion>
+</AccordionGroup>
+
+### Outflows
+
+<AccordionGroup>
+  <Accordion title="Storage Rebates">
+    Refunds when objects are deleted or shrunk
+  </Accordion>
+  
+  <Accordion title="System Operations">
+    Potential use for network-wide storage costs
+  </Accordion>
+</AccordionGroup>
+
+## Monitoring Storage Costs
+
+```typescript
+// Check storage cost for a transaction
+const dryRun = await client.dryRunTransactionBlock({
+    transactionBlock: await tx.build({ client }),
+});
+
+const gasUsed = dryRun.effects.gasUsed;
+console.log('Storage cost:', gasUsed.storageCost);
+console.log('Storage rebate:', gasUsed.storageRebate);
+console.log('Non-refundable fee:', gasUsed.nonRefundableStorageFee);
+
+const netStorageCost = 
+    BigInt(gasUsed.storageCost) - BigInt(gasUsed.storageRebate);
+console.log('Net storage cost:', netStorageCost);
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Design for storage efficiency">
+    ```move
+    // Bad: Storing large data on-chain
+    public struct Document has key {
+        id: UID,
+        content: vector<u8>,  // 1 MB of data
+    }
+    
+    // Good: Store reference to off-chain data
+    public struct Document has key {
+        id: UID,
+        content_hash: vector<u8>,  // 32 bytes
+        storage_url: String,       // URL to IPFS/Arweave
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Implement cleanup mechanisms">
+    ```move
+    // Allow users to clean up old data
+    public fun cleanup_old_records(registry: &mut Registry) {
+        let cutoff_time = current_time() - 90_DAYS;
+        
+        // Remove old records
+        registry.records.retain(|_, record| {
+            record.timestamp > cutoff_time
+        });
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Use dynamic fields wisely">
+    ```move
+    // Optional data as dynamic fields
+    // Only pay storage when actually used
+    if (has_metadata) {
+        dynamic_field::add(&mut obj.id, b"metadata", metadata);
+    }
+    
+    // Remove when no longer needed
+    if (dynamic_field::exists_(&obj.id, b"metadata")) {
+        let _: Metadata = dynamic_field::remove(&mut obj.id, b"metadata");
+        // Get storage rebate
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Long-Term Sustainability
+
+The storage fund ensures Sui can scale sustainably:
+
+1. **Bounded Growth**: Storage costs prevent spam
+2. **Economic Viability**: Validators compensated for storage
+3. **User Incentives**: Delete unused data to recover funds
+4. **Permanent Fund**: Non-refundable fees accumulate for future needs
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="Gas Mechanism" href="/concepts/gas-mechanism" icon="gas-pump">
+    Understand gas costs
+  </Card>
+  <Card title="Object Storage" href="/concepts/object-storage" icon="database">
+    How objects are stored
+  </Card>
+  <Card title="SUI Token" href="/concepts/sui-token" icon="coins">
+    Learn about SUI
+  </Card>
+</CardGroup>

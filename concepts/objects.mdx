@@ -1,0 +1,302 @@
+---
+title: Sui's Object Model
+description: Understand Sui's unique object-centric architecture and how objects serve as the foundation of the Sui blockchain.
+---
+
+Sui's object model is fundamentally different from account-based blockchains. Instead of organizing state around accounts, Sui treats everything as an **object** - making it the fundamental unit of storage and the primary building block for on-chain assets and logic.
+
+## What is a Sui Object?
+
+In Sui, an object is a structured piece of data with the following characteristics:
+
+<CardGroup cols={2}>
+  <Card title="Globally Unique" icon="fingerprint">
+    Each object has a unique ID derived from its creation transaction
+  </Card>
+  <Card title="Versioned" icon="code-branch">
+    Objects have a version number that increments with each mutation
+  </Card>
+  <Card title="Owned" icon="user">
+    Every object has an owner - an address, another object, or shared
+  </Card>
+  <Card title="Typed" icon="shapes">
+    Objects are instances of Move structs with the `key` ability
+  </Card>
+</CardGroup>
+
+## Object Structure
+
+Every Sui object must have `id: UID` as its first field. Here's what an object looks like in Move:
+
+```move filename="examples/move/basics/sources/object_basics.move"
+public struct Object has key, store {
+    id: UID,
+    value: u64,
+}
+
+public struct Wrapper has key {
+    id: UID,
+    o: Object,
+}
+
+public fun create(value: u64, recipient: address, ctx: &mut TxContext) {
+    transfer::public_transfer(
+        Object { id: object::new(ctx), value },
+        recipient,
+    )
+}
+```
+
+<Note>
+  The `UID` type is globally unique and can only be created through `object::new(ctx)`, ensuring no two objects can ever have the same ID.
+</Note>
+
+## Object Properties
+
+### ID and UID
+
+- **ID**: A copyable, droppable identifier that can be freely duplicated
+- **UID**: A unique identifier that cannot be copied or dropped, only deleted
+
+```move filename="crates/sui-framework/packages/sui-framework/sources/object.move"
+public struct ID has copy, drop, store {
+    bytes: address,
+}
+
+public struct UID has store {
+    id: ID,
+}
+```
+
+The `UID` type enforces uniqueness:
+- No two `UID` values are ever equal
+- Can only be created from `TxContext`
+- Must be explicitly deleted with `id.delete()`
+
+### Version Numbers
+
+From the Rust implementation:
+
+```rust filename="crates/sui-types/src/object.rs"
+pub struct MoveObject {
+    /// The type of this object. Immutable
+    type_: MoveObjectType,
+    /// DEPRECATED this field is no longer used to determine transfer
+    has_public_transfer: bool,
+    /// Number that increases each time a tx takes this object as a mutable input
+    /// This is a lamport timestamp, not a sequentially increasing version
+    version: SequenceNumber,
+    /// BCS bytes of a Move struct value
+    contents: Vec<u8>,
+}
+```
+
+<Accordion title="Why Lamport Timestamps?">
+  Sui uses Lamport timestamps instead of simple sequential numbers to support causally ordered execution. When an object is used as input to a transaction, its version is updated based on the maximum version of all inputs plus one.
+</Accordion>
+
+## Object Types
+
+Sui supports different types of objects for different use cases:
+
+<Tabs>
+  <Tab title="Owned Objects">
+    Objects owned by a single address. These can be used in transactions without consensus.
+
+    ```move
+    public fun create(value: u64, recipient: address, ctx: &mut TxContext) {
+        transfer::public_transfer(
+            Object { id: object::new(ctx), value },
+            recipient,
+        )
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Shared Objects">
+    Objects accessible by anyone. These require consensus and have slower transaction processing.
+
+    ```move
+    public fun create_shared(value: u64, ctx: &mut TxContext) {
+        transfer::public_share_object(
+            Object { id: object::new(ctx), value }
+        )
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Frozen Objects">
+    Immutable objects that can never be modified. Useful for constants and permanent data.
+
+    ```move
+    public fun freeze_object(o: Object) {
+        transfer::public_freeze_object(o)
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Wrapped Objects">
+    Objects that exist inside other objects, invisible to external transactions.
+
+    ```move
+    public fun wrap(o: Object, ctx: &mut TxContext) {
+        transfer::transfer(Wrapper { id: object::new(ctx), o }, ctx.sender());
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Object Operations
+
+### Creating Objects
+
+Objects are created by constructing a Move struct with `key` ability and a `UID`:
+
+```move
+public fun create(value: u64, recipient: address, ctx: &mut TxContext) {
+    transfer::public_transfer(
+        Object { id: object::new(ctx), value },
+        recipient,
+    )
+}
+```
+
+### Reading Objects
+
+```move
+public fun get_value(o: &Object): u64 {
+    o.value
+}
+```
+
+### Updating Objects
+
+```move
+public fun set_value(o: &mut Object, value: u64) {
+    o.value = value;
+}
+
+public fun update(o1: &mut Object, o2: &Object) {
+    o1.value = o2.value;
+    event::emit(NewValueEvent { new_value: o2.value })
+}
+```
+
+### Deleting Objects
+
+Objects must be unpacked and their `UID` explicitly deleted:
+
+```move
+public fun delete(o: Object) {
+    let Object { id, value: _ } = o;
+    id.delete();
+}
+```
+
+<Warning>
+  Forgetting to delete the `UID` will result in a compilation error, as `UID` does not have the `drop` ability.
+</Warning>
+
+## Special Object Types
+
+### Coin Objects
+
+Coins are optimized objects with a known structure:
+
+```rust filename="crates/sui-types/src/object.rs"
+pub fn new_coin(coin_type: TypeTag, version: SequenceNumber, id: ObjectID, value: u64) -> Self {
+    unsafe {
+        Self::new_from_execution_with_limit(
+            MoveObjectType::coin(coin_type),
+            true,
+            version,
+            Coin::new(id, value).to_bcs_bytes(),
+            256,
+        )
+        .unwrap()
+    }
+}
+
+/// Return the `value: u64` field of a `Coin<T>` type.
+pub fn get_coin_value_unsafe(&self) -> u64 {
+    debug_assert!(self.type_.is_coin());
+    // 32 bytes for object ID, 8 for balance
+    debug_assert!(self.contents.len() == 40);
+    u64::from_le_bytes(<[u8; 8]>::try_from(&self.contents[ID_END_INDEX..]).unwrap())
+}
+```
+
+### System Objects
+
+Sui has several singleton objects with hardcoded IDs:
+
+```move filename="crates/sui-framework/packages/sui-framework/sources/object.move"
+/// The hardcoded ID for the singleton Sui System State Object.
+const SUI_SYSTEM_STATE_OBJECT_ID: address = @0x5;
+
+/// The hardcoded ID for the singleton Clock Object.
+const SUI_CLOCK_OBJECT_ID: address = @0x6;
+
+/// The hardcoded ID for the singleton AuthenticatorState Object.
+const SUI_AUTHENTICATOR_STATE_ID: address = @0x7;
+
+/// The hardcoded ID for the singleton Random Object.
+const SUI_RANDOM_ID: address = @0x8;
+```
+
+## Object Size Limits
+
+Objects have size constraints defined in the protocol:
+
+```rust filename="crates/sui-types/src/object.rs"
+if contents.len() as u64 > max_move_object_size {
+    return Err(ExecutionError::from_kind(
+        ExecutionErrorKind::MoveObjectTooBig {
+            object_size: contents.len() as u64,
+            max_object_size: max_move_object_size,
+        },
+    ));
+}
+```
+
+The default maximum object size is configured in the protocol config, with exceptions for system objects when `allow_unbounded_system_objects()` is enabled.
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always delete UIDs">
+    When destructing an object, always call `.delete()` on its UID to properly clean up:
+    
+    ```move
+    let Object { id, value: _ } = o;
+    id.delete();
+    ```
+  </Accordion>
+  
+  <Accordion title="Use the right ownership model">
+    - **Owned objects** for user-specific assets (NFTs, tokens)
+    - **Shared objects** for multi-user protocols (DEX pools)
+    - **Frozen objects** for immutable data (metadata)
+  </Accordion>
+  
+  <Accordion title="Minimize object size">
+    Smaller objects cost less in storage fees and are more efficient to process:
+    - Use efficient data structures
+    - Avoid storing redundant data
+    - Consider dynamic fields for optional data
+  </Accordion>
+</AccordionGroup>
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="Ownership" href="/concepts/ownership" icon="key">
+    Learn about ownership types and rules
+  </Card>
+  <Card title="Dynamic Fields" href="/concepts/dynamic-fields" icon="layer-group">
+    Extend objects with dynamic fields
+  </Card>
+  <Card title="Object Storage" href="/concepts/object-storage" icon="database">
+    Understand how objects are stored
+  </Card>
+</CardGroup>

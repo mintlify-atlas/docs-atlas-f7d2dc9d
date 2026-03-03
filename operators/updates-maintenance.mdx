@@ -1,0 +1,529 @@
+---
+title: Updates and Maintenance
+description: Guide to updating Sui node software, performing maintenance, and handling upgrades safely.
+---
+
+Keeping your Sui node up to date is critical for network participation and security. This guide covers update procedures and maintenance tasks.
+
+## Update Process Overview
+
+<Warning>
+  Never delete your node databases during an update unless explicitly instructed. Deleting databases will require a full resync which can take days.
+</Warning>
+
+Typical update workflow:
+
+1. Download new binary or Docker image
+2. Stop the node
+3. Replace binary or update configuration
+4. Start the node
+5. Verify successful startup
+
+## Monitoring for Updates
+
+### Official Channels
+
+- **Discord**: [Sui Network Discord](https://discord.gg/sui) - #node-operator-announcements
+- **GitHub**: [Sui Releases](https://github.com/MystenLabs/sui/releases)
+- **Documentation**: [Sui Docs](https://docs.sui.io)
+
+### Version Information
+
+Check your current version:
+
+```bash
+sui-node --version
+```
+
+For running nodes:
+
+```bash
+# Via metrics
+curl -s http://localhost:9184/metrics | grep version
+
+# Via admin interface
+curl http://localhost:1337/node-info
+```
+
+## Systemd Update Procedure
+
+<Steps>
+  <Step title="Download new binary">
+    ```bash
+    export SUI_SHA=<new-version>
+    wget https://releases.sui.io/$SUI_SHA/sui-node
+    chmod +x sui-node
+    ```
+  </Step>
+
+  <Step title="Stop the node">
+    ```bash
+    sudo systemctl stop sui-node
+    ```
+
+    Verify it stopped:
+    ```bash
+    sudo systemctl status sui-node
+    ```
+  </Step>
+
+  <Step title="Backup current binary (optional)">
+    ```bash
+    sudo cp /opt/sui/bin/sui-node /opt/sui/bin/sui-node.backup
+    ```
+  </Step>
+
+  <Step title="Replace binary">
+    ```bash
+    sudo mv sui-node /opt/sui/bin/sui-node
+    ```
+  </Step>
+
+  <Step title="Start the node">
+    ```bash
+    sudo systemctl start sui-node
+    ```
+  </Step>
+
+  <Step title="Verify startup">
+    ```bash
+    # Check service status
+    sudo systemctl status sui-node
+
+    # Follow logs
+    journalctl -u sui-node -f
+
+    # Check sync progress
+    curl -s http://localhost:9184/metrics | grep highest_synced_checkpoint
+    ```
+  </Step>
+</Steps>
+
+## Docker Update Procedure
+
+<Steps>
+  <Step title="Stop containers">
+    ```bash
+    docker compose down
+    ```
+
+    This preserves volumes (databases).
+  </Step>
+
+  <Step title="Update image version">
+    Edit `docker-compose.yaml`:
+
+    ```yaml
+    services:
+      validator:
+        image: mysten/sui-node:<NEW_SUI_SHA>
+    ```
+
+    Or use environment variable:
+    ```bash
+    export SUI_SHA=<new-version>
+    ```
+  </Step>
+
+  <Step title="Pull new image">
+    ```bash
+    docker compose pull
+    ```
+  </Step>
+
+  <Step title="Start containers">
+    ```bash
+    docker compose up -d
+    ```
+  </Step>
+
+  <Step title="Verify startup">
+    ```bash
+    # Check container status
+    docker compose ps
+
+    # View logs
+    docker compose logs -f validator
+
+    # Check metrics
+    curl -s http://localhost:9184/metrics | grep version
+    ```
+  </Step>
+</Steps>
+
+## Automated Updates
+
+### Using Watchtower (Docker)
+
+Watchtower automatically updates Docker containers:
+
+```yaml
+version: '3'
+
+services:
+  validator:
+    image: mysten/sui-node:mainnet-latest
+    # ... other config ...
+
+  watchtower:
+    image: containrrr/watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 3600 --cleanup
+```
+
+<Warning>
+  Automated updates should only be used with caution. Test updates on testnet first and ensure you have monitoring in place.
+</Warning>
+
+### Update Script
+
+Create an automated update script:
+
+```bash
+#!/bin/bash
+# update-sui-node.sh
+
+SUI_SHA=$1
+BINARY_PATH="/opt/sui/bin/sui-node"
+
+if [ -z "$SUI_SHA" ]; then
+    echo "Usage: $0 <sui-sha>"
+    exit 1
+fi
+
+echo "Downloading sui-node $SUI_SHA..."
+wget -q https://releases.sui.io/$SUI_SHA/sui-node -O /tmp/sui-node
+
+if [ $? -ne 0 ]; then
+    echo "Failed to download binary"
+    exit 1
+fi
+
+chmod +x /tmp/sui-node
+
+echo "Stopping sui-node..."
+sudo systemctl stop sui-node
+
+echo "Backing up current binary..."
+sudo cp $BINARY_PATH ${BINARY_PATH}.backup
+
+echo "Installing new binary..."
+sudo mv /tmp/sui-node $BINARY_PATH
+
+echo "Starting sui-node..."
+sudo systemctl start sui-node
+
+echo "Waiting for startup..."
+sleep 5
+
+if systemctl is-active --quiet sui-node; then
+    echo "Update successful!"
+    NEW_VERSION=$(sudo -u sui $BINARY_PATH --version)
+    echo "New version: $NEW_VERSION"
+else
+    echo "Update failed! Rolling back..."
+    sudo systemctl stop sui-node
+    sudo mv ${BINARY_PATH}.backup $BINARY_PATH
+    sudo systemctl start sui-node
+    exit 1
+fi
+```
+
+Usage:
+
+```bash
+chmod +x update-sui-node.sh
+sudo ./update-sui-node.sh <new-sha>
+```
+
+## Configuration Updates
+
+Sometimes updates require configuration changes.
+
+### Check for Breaking Changes
+
+Review release notes for configuration changes:
+
+```bash
+# Compare your config with new template
+diff validator.yaml validator-template-new.yaml
+```
+
+### Apply Configuration Changes
+
+<Steps>
+  <Step title="Backup current configuration">
+    ```bash
+    sudo cp /opt/sui/config/validator.yaml /opt/sui/config/validator.yaml.backup
+    ```
+  </Step>
+
+  <Step title="Edit configuration">
+    ```bash
+    sudo nano /opt/sui/config/validator.yaml
+    ```
+  </Step>
+
+  <Step title="Validate configuration">
+    ```bash
+    # Test config loading (dry run)
+    sui-node --config-path /opt/sui/config/validator.yaml --help
+    ```
+  </Step>
+
+  <Step title="Restart node">
+    ```bash
+    sudo systemctl restart sui-node
+    ```
+  </Step>
+</Steps>
+
+## Rollback Procedure
+
+If an update fails, rollback to the previous version:
+
+### Systemd Rollback
+
+```bash
+# Stop the node
+sudo systemctl stop sui-node
+
+# Restore previous binary
+sudo cp /opt/sui/bin/sui-node.backup /opt/sui/bin/sui-node
+
+# Restore previous config if needed
+sudo cp /opt/sui/config/validator.yaml.backup /opt/sui/config/validator.yaml
+
+# Start the node
+sudo systemctl start sui-node
+
+# Verify
+journalctl -u sui-node -f
+```
+
+### Docker Rollback
+
+```bash
+# Stop containers
+docker compose down
+
+# Update to previous image
+export SUI_SHA=<previous-version>
+
+# Start containers
+docker compose up -d
+```
+
+## Maintenance Tasks
+
+### Database Pruning
+
+Check database size:
+
+```bash
+du -sh /opt/sui/db/
+du -sh /opt/sui/db/authorities_db
+du -sh /opt/sui/db/consensus_db
+```
+
+Pruning is configured in `validator.yaml`:
+
+```yaml
+authority-store-pruning-config:
+  num-epochs-to-retain: 0  # Aggressive pruning
+  num-epochs-to-retain-for-checkpoints: 2
+  pruning-run-delay-seconds: 60
+```
+
+Manual compaction (if needed):
+
+```bash
+# This is handled automatically by the node
+# Manual compaction is rarely needed
+```
+
+### Log Rotation
+
+For systemd:
+
+```bash
+# Configure journald log rotation
+sudo mkdir -p /etc/systemd/journald.conf.d/
+sudo tee /etc/systemd/journald.conf.d/sui.conf <<EOF
+[Journal]
+SystemMaxUse=10G
+SystemMaxFileSize=500M
+MaxRetentionSec=7day
+EOF
+
+sudo systemctl restart systemd-journald
+```
+
+For Docker:
+
+```yaml
+services:
+  validator:
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "10"
+        max-size: "100m"
+```
+
+### Metrics Cleanup
+
+Prometheus data retention:
+
+```bash
+# Set retention in prometheus.yml
+global:
+  storage:
+    tsdb:
+      retention.time: 30d
+      retention.size: 100GB
+```
+
+## Emergency Maintenance
+
+### Node Crash Recovery
+
+<Steps>
+  <Step title="Check logs for errors">
+    ```bash
+    journalctl -u sui-node --since "1 hour ago" -p err
+    ```
+  </Step>
+
+  <Step title="Verify database integrity">
+    ```bash
+    # Node performs checks on startup
+    sudo systemctl start sui-node
+    journalctl -u sui-node -f
+    ```
+  </Step>
+
+  <Step title="If database corruption detected">
+    You may need to restore from snapshot. See [Snapshots](/operators/snapshots) for details.
+  </Step>
+</Steps>
+
+### Disk Full Recovery
+
+```bash
+# Check disk usage
+df -h
+
+# Find large files
+du -h /opt/sui | sort -rh | head -20
+
+# Emergency pruning: reduce retention
+sudo systemctl stop sui-node
+
+# Edit config to reduce retention
+sudo nano /opt/sui/config/validator.yaml
+# Set num-epochs-to-retain: 0
+
+sudo systemctl start sui-node
+```
+
+## Security Updates
+
+### Private Security Fixes
+
+For critical security vulnerabilities, Mysten Labs may release signed binaries before source code publication.
+
+**Public key location:**
+```
+https://sui-private.s3.us-west-2.amazonaws.com/sui_security_release.pem
+```
+
+**Download and verify private release:**
+
+```bash
+# Using provided script
+wget https://raw.githubusercontent.com/MystenLabs/sui/main/nre/download_private.sh
+chmod +x download_private.sh
+./download_private.sh <directory-name>
+```
+
+For specific binaries:
+
+```bash
+# Download verification script
+wget https://raw.githubusercontent.com/MystenLabs/sui/main/nre/download_and_verify_private_binary.sh
+chmod +x download_and_verify_private_binary.sh
+
+# Download and verify
+./download_and_verify_private_binary.sh <directory-name> <binary-name>
+```
+
+## Testing Updates
+
+### Test on Testnet First
+
+Always test updates on testnet before mainnet:
+
+1. Run a testnet validator
+2. Apply update to testnet validator
+3. Monitor for 24-48 hours
+4. If stable, apply to mainnet
+
+### Update Checklist
+
+- [ ] Review release notes
+- [ ] Test on testnet
+- [ ] Backup configuration
+- [ ] Schedule maintenance window
+- [ ] Notify delegators (for validators)
+- [ ] Perform update
+- [ ] Monitor for 1 hour post-update
+- [ ] Verify metrics and logs
+- [ ] Update documentation
+
+## Scheduled Maintenance
+
+### Planning Maintenance Windows
+
+For validators:
+- Communicate with delegators
+- Schedule during low-activity periods
+- Keep downtime under 1 hour
+- Have rollback plan ready
+
+### Maintenance Mode
+
+Before major maintenance:
+
+```bash
+# For validators: consider leaving committee temporarily
+sui validator leave-committee
+
+# Wait for next epoch
+# Perform maintenance
+# Rejoin committee
+sui validator join-committee
+```
+
+<Warning>
+  Leaving and rejoining the committee should only be done for extended maintenance. For normal updates, simply restart the node.
+</Warning>
+
+## Post-Update Verification
+
+After any update:
+
+```bash
+# Check version
+curl -s http://localhost:9184/metrics | grep version
+
+# Check sync status
+curl -s http://localhost:9184/metrics | grep highest_synced_checkpoint
+
+# Check error rate
+curl -s http://localhost:9184/metrics | grep error
+
+# Monitor logs for 15 minutes
+journalctl -u sui-node -f
+```

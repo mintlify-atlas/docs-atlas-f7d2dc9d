@@ -1,0 +1,467 @@
+---
+title: "Installation"
+description: "Install the Sui CLI and development tools to start building on Sui"
+---
+
+## Prerequisites
+
+Before installing Sui, ensure you have the following:
+
+<AccordionGroup>
+  <Accordion title="Operating System" icon="computer">
+    - **Linux** (Ubuntu 20.04+, Debian 11+, or equivalent)
+    - **macOS** (12+, both Intel and Apple Silicon)
+    - **Windows** (via WSL2)
+  </Accordion>
+
+  <Accordion title="Development Tools" icon="wrench">
+    - **Rust** toolchain (1.75.0 or later)
+    - **Git** for version control
+    - **Build tools** (gcc, cmake, libssl-dev)
+  </Accordion>
+
+  <Accordion title="Recommended" icon="star">
+    - **VS Code** with Move extension
+    - **16GB+ RAM** for building from source
+    - **20GB+ disk space** for dependencies and builds
+  </Accordion>
+</AccordionGroup>
+
+## Install Rust
+
+Sui is written in Rust, so you'll need the Rust toolchain:
+
+<CodeGroup>
+```bash Linux/macOS
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+```
+
+```bash Windows (WSL2)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+```
+</CodeGroup>
+
+Verify installation:
+
+```bash
+rustc --version
+cargo --version
+```
+
+<Note>
+Sui requires Rust **1.75.0 or later**. Update if needed: `rustup update stable`
+</Note>
+
+## Install System Dependencies
+
+<Tabs>
+  <Tab title="Ubuntu/Debian">
+    ```bash
+    sudo apt-get update
+    sudo apt-get install -y \
+      curl \
+      git \
+      build-essential \
+      libssl-dev \
+      pkg-config \
+      cmake \
+      clang
+    ```
+  </Tab>
+
+  <Tab title="macOS">
+    ```bash
+    # Install Homebrew if not already installed
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    
+    # Install dependencies
+    brew install curl git cmake
+    ```
+  </Tab>
+
+  <Tab title="Windows (WSL2)">
+    ```bash
+    # Inside WSL2 Ubuntu
+    sudo apt-get update
+    sudo apt-get install -y \
+      curl \
+      git \
+      build-essential \
+      libssl-dev \
+      pkg-config \
+      cmake \
+      clang
+    ```
+  </Tab>
+</Tabs>
+
+## Install Sui from Binaries
+
+The fastest way to get started:
+
+<Steps>
+  <Step title="Download from GitHub Releases">
+    Visit the [Sui releases page](https://github.com/MystenLabs/sui/releases) and download the appropriate binary for your platform.
+    
+    <Tabs>
+      <Tab title="Linux">
+        ```bash
+        # Example for Linux x86_64
+        wget https://github.com/MystenLabs/sui/releases/download/mainnet-v1.68.0/sui-mainnet-v1.68.0-ubuntu-x86_64.tgz
+        tar -xzf sui-mainnet-v1.68.0-ubuntu-x86_64.tgz
+        sudo mv sui /usr/local/bin/
+        ```
+      </Tab>
+      <Tab title="macOS">
+        ```bash
+        # Example for macOS Intel
+        wget https://github.com/MystenLabs/sui/releases/download/mainnet-v1.68.0/sui-mainnet-v1.68.0-macos-x86_64.tgz
+        tar -xzf sui-mainnet-v1.68.0-macos-x86_64.tgz
+        sudo mv sui /usr/local/bin/
+        
+        # For Apple Silicon
+        wget https://github.com/MystenLabs/sui/releases/download/mainnet-v1.68.0/sui-mainnet-v1.68.0-macos-arm64.tgz
+        tar -xzf sui-mainnet-v1.68.0-macos-arm64.tgz
+        sudo mv sui /usr/local/bin/
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Verify Installation">
+    ```bash
+    sui --version
+    ```
+    
+    Expected output:
+    ```
+    sui 1.68.0
+    ```
+  </Step>
+</Steps>
+
+## Install Sui from Source
+
+For the latest features or development:
+
+<Steps>
+  <Step title="Clone the Repository">
+    ```bash
+    git clone https://github.com/MystenLabs/sui.git
+    cd sui
+    ```
+    
+    <Info>
+    For a specific version: `git checkout mainnet-v1.68.0`
+    </Info>
+  </Step>
+
+  <Step title="Build the Sui Binary">
+    ```bash
+    cargo install --locked --git https://github.com/MystenLabs/sui.git --branch main sui
+    ```
+    
+    Or build from local checkout:
+    ```bash
+    cargo build --release --bin sui
+    sudo mv target/release/sui /usr/local/bin/
+    ```
+    
+    <Warning>
+    Building from source can take **15-30 minutes** and requires significant RAM.
+    </Warning>
+  </Step>
+
+  <Step title="Verify Installation">
+    ```bash
+    sui --version
+    ```
+  </Step>
+</Steps>
+
+## Install Using Cargo
+
+Install directly from crates.io:
+
+```bash
+cargo install --locked --git https://github.com/MystenLabs/sui.git --branch main sui
+```
+
+<Tip>
+Add `--branch testnet` or `--branch devnet` to install network-specific versions.
+</Tip>
+
+## Alternative Installation Methods
+
+### Homebrew (macOS)
+
+```bash
+brew install sui
+```
+
+### Chocolatey (Windows)
+
+```powershell
+choco install sui
+```
+
+<Note>
+These may not always have the latest version. Check with `sui --version`.
+</Note>
+
+## Initial Configuration
+
+After installation, set up your Sui environment:
+
+<Steps>
+  <Step title="Initialize Sui Configuration">
+    ```bash
+    sui client
+    ```
+    
+    On first run, this will:
+    - Create `~/.sui/sui_config/` directory
+    - Generate a new keypair
+    - Create a client configuration file
+    - Set up environment for Sui devnet
+  </Step>
+
+  <Step title="Check Active Address">
+    ```bash
+    sui client active-address
+    ```
+    
+    Output:
+    ```
+    0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+    ```
+  </Step>
+
+  <Step title="Get Test Tokens (Devnet)">
+    ```bash
+    sui client faucet
+    ```
+    
+    This will request test SUI tokens from the devnet faucet.
+  </Step>
+
+  <Step title="Check Balance">
+    ```bash
+    sui client balance
+    ```
+    
+    Expected output:
+    ```
+    ╭────────────────────────────────────────╮
+    │ Balance                                │
+    ├────────────────────────────────────────┤
+    │ SUI: 1.0 SUI                           │
+    ╰────────────────────────────────────────╯
+    ```
+  </Step>
+</Steps>
+
+## Network Configuration
+
+Configure connections to different Sui networks:
+
+<Tabs>
+  <Tab title="Devnet">
+    ```bash
+    sui client new-env \
+      --alias devnet \
+      --rpc https://fullnode.devnet.sui.io:443
+    
+    sui client switch --env devnet
+    ```
+  </Tab>
+
+  <Tab title="Testnet">
+    ```bash
+    sui client new-env \
+      --alias testnet \
+      --rpc https://fullnode.testnet.sui.io:443
+    
+    sui client switch --env testnet
+    ```
+  </Tab>
+
+  <Tab title="Mainnet">
+    ```bash
+    sui client new-env \
+      --alias mainnet \
+      --rpc https://fullnode.mainnet.sui.io:443
+    
+    sui client switch --env mainnet
+    ```
+  </Tab>
+
+  <Tab title="Local Network">
+    ```bash
+    sui client new-env \
+      --alias local \
+      --rpc http://127.0.0.1:9000
+    
+    sui client switch --env local
+    ```
+  </Tab>
+</Tabs>
+
+View configured environments:
+
+```bash
+sui client envs
+```
+
+## Install IDE Support
+
+### VS Code
+
+Install the Move language extension:
+
+<Steps>
+  <Step title="Install Extension">
+    Search for "move-analyzer" in VS Code extensions marketplace and install.
+  </Step>
+
+  <Step title="Configure Move Analyzer">
+    The extension uses the Move analyzer binary. Install it:
+    
+    ```bash
+    cargo install --git https://github.com/move-language/move move-analyzer
+    ```
+  </Step>
+
+  <Step title="Enable in VS Code">
+    Create `.vscode/settings.json` in your project:
+    
+    ```json
+    {
+      "move-analyzer.server.path": "~/.cargo/bin/move-analyzer"
+    }
+    ```
+  </Step>
+</Steps>
+
+### Other IDEs
+
+- **Emacs**: [move-mode](https://github.com/move-language/move/tree/main/language/move-analyzer/editors/emacs)
+- **Vim/Neovim**: Use LSP client with move-analyzer
+
+## Verify Complete Installation
+
+Run a comprehensive check:
+
+```bash
+# Check Sui version
+sui --version
+
+# Check available commands
+sui --help
+
+# Verify network connection
+sui client objects
+
+# Check gas balance
+sui client gas
+```
+
+If all commands execute successfully, you're ready to start developing!
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Command not found: sui">
+    **Solution**: Add Cargo bin directory to PATH:
+    
+    ```bash
+    echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc
+    source ~/.bashrc
+    ```
+  </Accordion>
+
+  <Accordion title="Build fails with linker errors">
+    **Solution**: Install required development libraries:
+    
+    ```bash Ubuntu/Debian
+    sudo apt-get install -y build-essential libssl-dev pkg-config
+    ```
+    
+    ```bash macOS
+    xcode-select --install
+    ```
+  </Accordion>
+
+  <Accordion title="Out of memory during build">
+    **Solution**: 
+    - Close other applications
+    - Use `cargo build` instead of `cargo install` (slower but less memory)
+    - Add swap space (Linux)
+    - Use pre-built binaries instead
+  </Accordion>
+
+  <Accordion title="Faucet request fails">
+    **Solution**:
+    - Check network connection: `sui client envs`
+    - Try web faucet: https://faucet.devnet.sui.io/
+    - Switch to a different network: `sui client switch --env testnet`
+  </Accordion>
+
+  <Accordion title="SSL/TLS errors">
+    **Solution**: Update certificates:
+    
+    ```bash Ubuntu/Debian
+    sudo apt-get install ca-certificates
+    sudo update-ca-certificates
+    ```
+    
+    ```bash macOS
+    brew install openssl
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Update Sui
+
+To update to the latest version:
+
+<Tabs>
+  <Tab title="From Source">
+    ```bash
+    cd sui
+    git pull
+    cargo install --locked --path crates/sui
+    ```
+  </Tab>
+
+  <Tab title="Using Cargo">
+    ```bash
+    cargo install --locked --git https://github.com/MystenLabs/sui.git --branch main sui --force
+    ```
+  </Tab>
+
+  <Tab title="Homebrew">
+    ```bash
+    brew upgrade sui
+    ```
+  </Tab>
+</Tabs>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart Tutorial" icon="rocket" href="/quickstart">
+    Build and deploy your first Move package
+  </Card>
+  <Card title="Your First Move Package" icon="code" href="/guides/your-first-move-package">
+    Learn Move programming basics
+  </Card>
+  <Card title="CLI Reference" icon="terminal" href="/cli/overview">
+    Explore all CLI commands
+  </Card>
+  <Card title="Setup Dev Environment" icon="laptop-code" href="/guides/setup-dev-environment">
+    Configure your complete dev environment
+  </Card>
+</CardGroup>

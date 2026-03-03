@@ -1,0 +1,581 @@
+---
+title: Validator Operations
+description: Day-to-day operational guide for Sui validators including metadata updates, gas price management, and peer reporting.
+---
+
+This guide covers common operational tasks for active Sui validators, including metadata updates, commission changes, and using the validator CLI tool.
+
+## Validator Metadata
+
+Validator metadata is stored on-chain and visible to delegators. Keep it current and professional.
+
+### Viewing Metadata
+
+Check your validator's current metadata:
+
+```bash
+# Display your validator metadata
+sui validator display-metadata
+
+# Display another validator's metadata
+sui validator display-metadata <validator-address>
+```
+
+Output includes:
+- Name and description
+- Image and project URLs
+- Network addresses
+- Public keys
+- Gas price and commission
+- Staking pool info
+
+### Updating Metadata
+
+Some metadata changes take effect immediately, others at the next epoch.
+
+**Immediate updates**:
+- Name
+- Description  
+- Image URL
+- Project URL
+
+**Next-epoch updates**:
+- Network addresses
+- Public keys (protocol, network, worker)
+- Gas price
+
+## Metadata Update Commands
+
+### Update Name
+
+```bash
+sui validator update-metadata --name "New Validator Name"
+
+# Or using Sui client directly:
+sui client call --package 0x3 --module sui_system \
+  --function update_validator_name \
+  --args 0x5 "New Validator Name" \
+  --gas-budget 10000
+```
+
+### Update Description
+
+```bash
+sui validator update-metadata --description "Updated validator description"
+```
+
+### Update Image URL
+
+```bash
+sui validator update-metadata --image-url "https://example.com/new-logo.png"
+```
+
+### Update Project URL
+
+```bash
+sui validator update-metadata --project-url "https://new-website.com"
+```
+
+### Update Network Address
+
+```bash
+sui validator update-metadata \
+  --network-address "/ip4/192.168.1.1/tcp/8080/http"
+```
+
+<Note>
+  Network address updates take effect at the next epoch. Ensure your node is accessible at the new address before the epoch boundary.
+</Note>
+
+### Update P2P Address
+
+```bash
+# Update p2p address
+sui client call --package 0x3 --module sui_system \
+  --function update_validator_next_epoch_p2p_address \
+  --args 0x5 "[4, 192, 168, 1, 1]" \
+  --gas-budget 10000
+```
+
+The address must be provided as a byte array representing the multiaddr.
+
+### Update Protocol Public Key
+
+When rotating the protocol key:
+
+```bash
+sui validator update-metadata \
+  --protocol-pubkey <new-bls-pubkey> \
+  --proof-of-possession <pop>
+```
+
+**Generate new PoP**:
+
+```bash
+# Serialize payload for PoP
+sui validator serialize-payload-pop \
+  --account-address <validator-address> \
+  --protocol-public-key <new-bls-pubkey>
+
+# Sign the payload with your BLS key offline
+# Then use the signature as proof-of-possession
+```
+
+<Warning>
+  Changing the protocol key requires generating a new Proof of Possession (PoP). Keep both old and new keys until the epoch changes.
+</Warning>
+
+## Gas Price Management
+
+### Viewing Current Gas Price
+
+```bash
+# View your gas price quote
+sui validator display-metadata | grep "gas_price"
+
+# View reference gas price (network-wide)
+curl -X POST http://localhost:9000 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getReferenceGasPrice",
+    "params": []
+  }'
+```
+
+### Updating Gas Price
+
+As a validator with Operation Cap:
+
+```bash
+# Update gas price quote
+sui validator update-gas-price 1000
+```
+
+As an operation cap holder (delegated):
+
+```bash
+sui validator update-gas-price \
+  --operation-cap-id <cap-object-id> \
+  1000
+```
+
+**Gas price guidelines**:
+- Monitor network conditions
+- Check other validators' quotes
+- Mainnet typical: 750-1,000 MIST
+- Update during low-activity periods
+
+## Commission Management
+
+### Checking Current Commission
+
+```bash
+sui validator display-metadata | grep "commission_rate"
+```
+
+Commission is displayed in basis points (200 = 2%).
+
+### Updating Commission Rate
+
+For active validators:
+
+```bash
+# Set commission rate (200 basis points = 2%)
+sui validator update-metadata --commission-rate 200
+
+# Or using client directly:
+sui client call --package 0x3 --module sui_system \
+  --function request_set_commission_rate \
+  --args 0x5 200
+```
+
+For validator candidates:
+
+```bash
+sui client call --package 0x3 --module sui_system \
+  --function set_candidate_validator_commission_rate \
+  --args 0x5 200
+```
+
+**Best practices**:
+- Communicate changes to delegators in advance
+- Consider market rates (typically 2-10%)
+- Changes take effect next epoch
+- Don't change too frequently
+
+## Peer Reporting
+
+Validators can report peers for malicious behavior.
+
+### Reporting a Validator
+
+```bash
+# Report validator for misbehavior
+sui validator report-validator <reportee-address>
+
+# With operation cap:
+sui validator report-validator \
+  --operation-cap-id <cap-object-id> \
+  <reportee-address>
+```
+
+### Undoing a Report
+
+```bash
+# Undo previous report
+sui validator report-validator \
+  --undo-report true \
+  <reportee-address>
+```
+
+**Reporting guidelines**:
+- Only report for legitimate protocol violations
+- Document reason for report
+- If 2f+1 validators report, target is slashed
+- False reporting can damage reputation
+
+## Operation Cap Management
+
+### What is Operation Cap?
+
+Operation Cap allows delegation of validator operations without exposing the main validator account key.
+
+**Operations enabled**:
+- Update gas price
+- Report validators
+- Undo validator reports
+
+### Viewing Operation Cap
+
+```bash
+# List objects owned by validator account
+sui client objects
+
+# Look for "UnverifiedValidatorOperationCap"
+```
+
+Or check on explorer using validator address.
+
+### Transferring Operation Cap
+
+Delegate operations to another account:
+
+```bash
+# Transfer cap to operator
+sui client transfer \
+  --object-id <operation-cap-id> \
+  --to <operator-address>
+```
+
+### Rotating Operation Cap
+
+Invalidate current cap and create new one:
+
+```bash
+sui client call --package 0x3 --module sui_system \
+  --function rotate_operation_cap \
+  --args 0x5 \
+  --gas-budget 10000
+```
+
+The new cap is automatically transferred to the validator account.
+
+**Use cases for rotation**:
+- Compromised operator account
+- Changing operational team
+- Security policy updates
+
+## Committee Management
+
+### Joining the Committee
+
+After becoming a candidate and accumulating minimum stake:
+
+```bash
+# Request to join active validator set
+sui validator join-committee
+```
+
+You'll become active at the next epoch boundary.
+
+### Leaving the Committee
+
+To voluntarily leave the validator set:
+
+```bash
+# Request removal from active set
+sui validator leave-committee
+```
+
+**Process**:
+1. Submit leave request
+2. Remain active until next epoch
+3. Removed at epoch boundary
+4. Staking pool becomes inactive
+5. Delegators can withdraw
+
+**When to leave**:
+- Extended maintenance (>24 hours)
+- Hardware migration
+- Voluntary exit from validation
+
+<Warning>
+  Leaving the committee makes your staking pool inactive. Delegators cannot stake or earn rewards until you rejoin.
+</Warning>
+
+## Becoming a Validator
+
+For new validators joining the network.
+
+### Step 1: Generate Validator Info
+
+```bash
+sui validator make-validator-info \
+  "Validator Name" \
+  "Professional validator description" \
+  "https://example.com/validator-logo.png" \
+  "https://validator-website.com" \
+  "validator.example.com" \
+  1000  # gas price
+```
+
+This generates:
+- `validator.info` file with metadata
+- Copies keys from your sui.keystore
+
+**validator.info contents**:
+- Name, description, URLs
+- Public keys (protocol, network, worker, account)
+- Network addresses
+- Initial gas price
+- Proof of possession
+
+### Step 2: Become Candidate
+
+```bash
+sui validator become-candidate validator.info
+```
+
+This submits on-chain transaction to register as a validator candidate.
+
+### Step 3: Accumulate Stake
+
+As a candidate:
+- Start your fullnode to sync with the network
+- Accept self-stake and delegations
+- Promote your validator to attract delegators
+- Reach minimum stake requirement
+
+### Step 4: Join Committee
+
+Once minimum stake reached:
+
+```bash
+sui validator join-committee
+```
+
+You'll join the active set at the next epoch.
+
+## Offline Signing
+
+For enhanced security, sign validator transactions offline.
+
+### Supported Operations
+
+- `become-candidate`
+- `join-committee`
+- `leave-committee`
+- `update-metadata`
+- `update-gas-price`
+- `report-validator`
+
+### Offline Signing Process
+
+<Steps>
+  <Step title="Generate unsigned transaction">
+    ```bash
+    # Add --serialize-unsigned-transaction flag
+    sui validator update-gas-price 1000 --serialize-unsigned-transaction
+    
+    # Output:
+    # Serialized transaction for signing: <BASE64_STRING>
+    ```
+  </Step>
+
+  <Step title="Sign on offline machine">
+    ```bash
+    # Transfer base64 string to offline machine
+    # Sign with sui keytool
+    sui keytool sign \
+      --address <validator-address> \
+      --data <BASE64_STRING>
+    
+    # Output: Signature and public key
+    ```
+  </Step>
+
+  <Step title="Execute signed transaction">
+    ```bash
+    # On online machine
+    sui client execute-signed-tx \
+      --tx-bytes <BASE64_STRING> \
+      --signatures <SIGNATURE>
+    ```
+  </Step>
+</Steps>
+
+### Multisig Operations
+
+For multisig validator accounts:
+
+```bash
+# Set active address to multisig address
+sui client switch --address <MULTISIG_ADDRESS>
+
+# Then execute commands normally
+sui validator update-gas-price 1000
+```
+
+## Monitoring Validator Status
+
+### On-Chain Status
+
+```bash
+# View full validator metadata
+sui validator display-metadata
+
+# Check if in active set
+sui client call --package 0x3 --module sui_system \
+  --function get_validators \
+  --args 0x5 \
+  | grep <your-address>
+```
+
+### Node Health
+
+```bash
+# Check node metrics
+curl -s http://localhost:9184/metrics | grep -E \
+  "highest_synced_checkpoint|connected_peers|current_round"
+
+# View recent logs
+journalctl -u sui-node --since "1 hour ago" -p warning
+```
+
+### Performance Metrics
+
+Track validator performance:
+
+```bash
+# Consensus participation
+curl -s http://localhost:9184/metrics | grep consensus_committed_subdags
+
+# Certificate processing
+curl -s http://localhost:9184/metrics | grep total_certificates
+
+# Transaction throughput
+curl -s http://localhost:9184/metrics | grep total_transaction_effects
+```
+
+## Common Operational Tasks
+
+### Daily Checks
+
+```bash
+#!/bin/bash
+# daily-validator-check.sh
+
+echo "=== Validator Health Check ==="
+echo
+
+# Check service status
+echo "Service Status:"
+systemctl is-active sui-node
+echo
+
+# Check sync status
+echo "Sync Status:"
+curl -s http://localhost:9184/metrics | grep highest_synced_checkpoint
+echo
+
+# Check peer count
+echo "Peer Count:"
+curl -s http://localhost:9184/metrics | grep connected_peers
+echo
+
+# Check for errors
+echo "Recent Errors:"
+journalctl -u sui-node --since "1 day ago" -p err | tail -5
+echo
+
+# Check disk usage
+echo "Disk Usage:"
+df -h /opt/sui/db | tail -1
+```
+
+### Weekly Tasks
+
+- Review performance metrics
+- Check for software updates
+- Verify backup completion
+- Review validator ranking
+- Analyze delegator changes
+
+### Monthly Tasks
+
+- Review commission rate competitiveness
+- Analyze reward trends
+- Capacity planning review
+- Update validator website/documentation
+- Community engagement
+
+## Best Practices
+
+### Operational Excellence
+
+1. **Maintain high uptime**: >99.5% availability
+2. **Monitor actively**: Set up alerts for critical issues
+3. **Update promptly**: Apply updates within 24-48 hours
+4. **Communicate clearly**: Keep delegators informed
+5. **Document changes**: Maintain operational log
+6. **Test before production**: Use testnet for new procedures
+
+### Security
+
+1. **Protect keys**: Use HSM or secure offline storage
+2. **Use Operation Cap**: Separate operational and financial keys
+3. **Regular audits**: Review access logs and configurations
+4. **Principle of least privilege**: Limit access to essential personnel
+5. **Incident response plan**: Document procedures for compromises
+
+### Delegator Relations
+
+1. **Transparency**: Publish regular performance reports
+2. **Communication**: Announce maintenance and changes
+3. **Competitive commission**: Research market rates
+4. **Professional presence**: Maintain website and social media
+5. **Support**: Respond to delegator questions
+
+## Troubleshooting
+
+For operational issues, see:
+
+- [Troubleshooting Guide](/operators/troubleshooting)
+- [Monitoring](/operators/monitoring)
+- [Updates and Maintenance](/operators/updates-maintenance)
+
+## Resources
+
+### Validator Tools
+
+- [Sui Explorer](https://suiscan.xyz/mainnet/validators)
+- [SuiVision](https://suivision.xyz/validators)
+- [Metrics Dashboard](https://metrics.sui.io)
+
+### Documentation
+
+- [Staking and Rewards](/operators/staking-rewards)
+- [Committee Management](/operators/committee-management)
+- [Validator Requirements](/operators/validator-requirements)

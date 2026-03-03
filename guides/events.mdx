@@ -1,0 +1,519 @@
+---
+title: Emitting and Handling Events
+description: Use events to track and index blockchain activity on Sui
+---
+
+Events allow smart contracts to emit structured data about important state changes. They're essential for indexing, notifications, and building responsive applications.
+
+## Event Basics
+
+Events in Move must have the `copy` and `drop` abilities:
+
+```move
+module my_package::example {
+    use sui::event;
+
+    /// Event emitted when an item is purchased
+    public struct ItemPurchased has copy, drop {
+        buyer: address,
+        item_id: ID,
+        price: u64,
+    }
+
+    public fun purchase_item(
+        item_id: ID,
+        payment: Coin<SUI>,
+        ctx: &TxContext
+    ) {
+        let price = payment.value();
+        let buyer = ctx.sender();
+
+        // Emit event
+        event::emit(ItemPurchased {
+            buyer,
+            item_id,
+            price,
+        });
+
+        // Continue with purchase logic...
+    }
+}
+```
+
+## Real Example: NFT Events
+
+From `examples/move/nft`:
+
+```move
+module examples::testnet_nft {
+    use std::string;
+    use sui::event;
+    use sui::url::{Self, Url};
+
+    public struct TestnetNFT has key, store {
+        id: UID,
+        name: string::String,
+        description: string::String,
+        url: Url,
+    }
+
+    // Event definition
+    public struct NFTMinted has copy, drop {
+        object_id: ID,
+        creator: address,
+        name: string::String,
+    }
+
+    public fun mint_to_sender(
+        name: vector<u8>,
+        description: vector<u8>,
+        url: vector<u8>,
+        ctx: &mut TxContext,
+    ) {
+        let sender = ctx.sender();
+        let nft = TestnetNFT {
+            id: object::new(ctx),
+            name: string::utf8(name),
+            description: string::utf8(description),
+            url: url::new_unsafe_from_bytes(url),
+        };
+
+        // Emit minting event
+        event::emit(NFTMinted {
+            object_id: object::id(&nft),
+            creator: sender,
+            name: nft.name,
+        });
+
+        transfer::public_transfer(nft, sender);
+    }
+}
+```
+
+## Game Events Example
+
+From `examples/move/hero`:
+
+```move
+module hero::example {
+    use sui::event;
+
+    /// Event when hero slays a boar
+    public struct BoarSlainEvent has copy, drop {
+        slayer_address: address,
+        boar: ID,
+        hero: ID,
+        game_id: ID,
+    }
+
+    public fun slay(hero: &mut Hero, boar: Boar, ctx: &TxContext) {
+        assert!(hero.game_id == boar.game_id, EWrongGame);
+
+        let Boar {
+            id: boar_id,
+            strength: boar_strength,
+            health: mut boar_health,
+            game_id: _,
+        } = boar;
+
+        let experience = boar_health;
+
+        // Battle logic...
+        loop {
+            let hero_strength = hero.hero_strength();
+            if (boar_health < hero_strength) {
+                break
+            } else {
+                boar_health = boar_health - hero_strength;
+            };
+            assert!(hero.health >= boar_strength, EBoarWon);
+            hero.health = hero.health - boar_strength;
+        };
+
+        // Update hero
+        hero.experience = hero.experience + experience;
+        if (hero.sword.is_some()) {
+            hero.sword.borrow_mut().level_up_sword(1)
+        };
+
+        // Emit victory event
+        event::emit(BoarSlainEvent {
+            slayer_address: ctx.sender(),
+            hero: object::id(hero),
+            boar: boar_id.uid_to_inner(),
+            game_id: hero.game_id,
+        });
+
+        boar_id.delete();
+    }
+}
+```
+
+## Event Design Patterns
+
+### State Change Events
+
+Track important state transitions:
+
+```move
+public struct StatusChanged has copy, drop {
+    object_id: ID,
+    old_status: u8,
+    new_status: u8,
+    changed_by: address,
+    timestamp: u64,
+}
+
+public fun update_status(
+    obj: &mut MyObject,
+    new_status: u8,
+    ctx: &TxContext
+) {
+    let old_status = obj.status;
+    obj.status = new_status;
+
+    event::emit(StatusChanged {
+        object_id: object::id(obj),
+        old_status,
+        new_status,
+        changed_by: ctx.sender(),
+        timestamp: ctx.epoch_timestamp_ms(),
+    });
+}
+```
+
+### Transfer Events
+
+```move
+public struct NFTTransferred has copy, drop {
+    nft_id: ID,
+    from: address,
+    to: address,
+    timestamp: u64,
+}
+
+public fun transfer_nft(
+    nft: NFT,
+    recipient: address,
+    ctx: &TxContext
+) {
+    event::emit(NFTTransferred {
+        nft_id: object::id(&nft),
+        from: ctx.sender(),
+        to: recipient,
+        timestamp: ctx.epoch_timestamp_ms(),
+    });
+
+    transfer::public_transfer(nft, recipient);
+}
+```
+
+### Financial Events
+
+```move
+public struct PaymentProcessed has copy, drop {
+    payer: address,
+    recipient: address,
+    amount: u64,
+    currency: String,
+    reference: String,
+}
+
+public fun process_payment(
+    payment: Coin<SUI>,
+    recipient: address,
+    reference: String,
+    ctx: &TxContext
+) {
+    let amount = payment.value();
+
+    event::emit(PaymentProcessed {
+        payer: ctx.sender(),
+        recipient,
+        amount,
+        currency: b"SUI".to_string(),
+        reference,
+    });
+
+    transfer::public_transfer(payment, recipient);
+}
+```
+
+## Multiple Events
+
+Emit multiple events in one transaction:
+
+```move
+public struct OrderCreated has copy, drop {
+    order_id: ID,
+    creator: address,
+}
+
+public struct ItemReserved has copy, drop {
+    item_id: ID,
+    reserved_for: ID,  // order_id
+}
+
+public fun create_order(
+    item_id: ID,
+    ctx: &mut TxContext
+) {
+    let order = Order {
+        id: object::new(ctx),
+        item_id,
+        creator: ctx.sender(),
+    };
+
+    // First event
+    event::emit(OrderCreated {
+        order_id: object::id(&order),
+        creator: ctx.sender(),
+    });
+
+    // Second event
+    event::emit(ItemReserved {
+        item_id,
+        reserved_for: object::id(&order),
+    });
+
+    transfer::transfer(order, ctx.sender());
+}
+```
+
+## Event Indexing
+
+Events can be queried using the Sui SDK:
+
+### Rust SDK
+
+From `crates/sui-sdk/examples/event_api.rs`:
+
+```rust
+use sui_sdk::SuiClientBuilder;
+use sui_sdk::rpc_types::EventFilter;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default().build_testnet().await?;
+
+    // Query events by transaction digest
+    let events = sui
+        .event_api()
+        .query_events(
+            EventFilter::Transaction(digest),
+            None,  // cursor
+            Some(10),  // limit
+            false,  // descending order
+        )
+        .await?;
+
+    for event in events.data {
+        println!("Event: {:?}", event);
+    }
+
+    Ok(())
+}
+```
+
+### TypeScript SDK
+
+```typescript
+import { SuiClient } from '@mysten/sui/client';
+
+const client = new SuiClient({ url: 'https://fullnode.testnet.sui.io:443' });
+
+// Query events
+const events = await client.queryEvents({
+  query: { MoveEventType: '0xPACKAGE::module::EventType' },
+  limit: 50,
+});
+
+events.data.forEach(event => {
+  console.log('Event:', event);
+});
+```
+
+## Event Filtering
+
+### By Move Event Type
+
+```rust
+EventFilter::MoveEventType(
+    "0x2::nft::NFTMinted".parse()?
+)
+```
+
+### By Package
+
+```rust
+EventFilter::Package(package_id)
+```
+
+### By Module
+
+```rust
+EventFilter::MoveEventModule {
+    package: package_id,
+    module: "nft".parse()?,
+}
+```
+
+### By Sender
+
+```rust
+EventFilter::Sender(sender_address)
+```
+
+## Best Practices
+
+### 1. Include relevant identifiers
+
+```move
+// Good
+public struct TradeExecuted has copy, drop {
+    trade_id: ID,
+    seller: address,
+    buyer: address,
+    item_id: ID,
+    price: u64,
+}
+
+// Avoid
+public struct TradeExecuted has copy, drop {
+    price: u64,  // Missing context
+}
+```
+
+### 2. Add timestamps when useful
+
+```move
+public struct ProposalCreated has copy, drop {
+    proposal_id: ID,
+    proposer: address,
+    created_at: u64,  // epoch timestamp
+}
+
+public fun create_proposal(ctx: &mut TxContext) {
+    // ...
+    event::emit(ProposalCreated {
+        proposal_id,
+        proposer: ctx.sender(),
+        created_at: ctx.epoch_timestamp_ms(),
+    });
+}
+```
+
+### 3. Use descriptive event names
+
+```move
+// Good
+public struct LoanRepaid has copy, drop { /* ... */ }
+public struct CollateralLiquidated has copy, drop { /* ... */ }
+
+// Avoid
+public struct Event1 has copy, drop { /* ... */ }
+public struct Update has copy, drop { /* ... */ }
+```
+
+### 4. Keep events focused
+
+```move
+// Good: Specific events
+public struct OrderCreated has copy, drop { /* ... */ }
+public struct OrderCancelled has copy, drop { /* ... */ }
+public struct OrderFulfilled has copy, drop { /* ... */ }
+
+// Avoid: Generic event
+public struct OrderEvent has copy, drop {
+    event_type: String,  // "created", "cancelled", etc.
+    // ...
+}
+```
+
+### 5. Document event usage
+
+```move
+/// Emitted when a user stakes tokens.
+/// This event is used by the indexer to track total staked amounts.
+public struct TokensStaked has copy, drop {
+    staker: address,
+    amount: u64,
+    stake_id: ID,
+}
+```
+
+## Common Event Patterns
+
+### Creation/Deletion Events
+
+```move
+public struct ObjectCreated has copy, drop {
+    object_id: ID,
+    creator: address,
+}
+
+public struct ObjectDeleted has copy, drop {
+    object_id: ID,
+    deleted_by: address,
+}
+```
+
+### Before/After Events
+
+```move
+public struct BalanceChanged has copy, drop {
+    account: address,
+    old_balance: u64,
+    new_balance: u64,
+    delta: u64,  // can be positive or negative
+}
+```
+
+### Multi-step Process Events
+
+```move
+public struct AuctionStarted has copy, drop {
+    auction_id: ID,
+    item_id: ID,
+    starting_price: u64,
+}
+
+public struct BidPlaced has copy, drop {
+    auction_id: ID,
+    bidder: address,
+    amount: u64,
+}
+
+public struct AuctionEnded has copy, drop {
+    auction_id: ID,
+    winner: Option<address>,
+    final_price: u64,
+}
+```
+
+## Testing Events
+
+Events are emitted during tests but can't be directly inspected in unit tests. Test the side effects instead:
+
+```move
+#[test]
+fun test_event_emission() {
+    let mut ctx = tx_context::dummy();
+
+    // This will emit an event
+    let nft = mint_nft(b"Test", b"Description", b"url", &mut ctx);
+
+    // Test the resulting state
+    assert!(nft.name() == b"Test".to_string(), 0);
+
+    // Events are emitted but not directly testable
+    // Use integration tests or indexer to verify events
+}
+```
+
+## Next Steps
+
+- [Implement capability patterns](/guides/capability-pattern)
+- [Build programmable transactions](/guides/programmable-transactions)
+- [Index blockchain data](/guides/indexing-data)
+- Learn about [Sui Event API](https://docs.sui.io/references/events)

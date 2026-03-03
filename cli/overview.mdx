@@ -1,0 +1,123 @@
+---
+title: CLI Overview
+description: Overview of the Sui command-line interface for interacting with the Sui network
+---
+
+The Sui CLI is a comprehensive command-line tool for interacting with the Sui blockchain. It provides functionality for managing keys, interacting with the network, building and deploying Move packages, and operating validators.
+
+## Installation
+
+See the [Installation Guide](./installation) for detailed instructions on installing the Sui CLI.
+
+## Available Commands
+
+The Sui CLI is organized into several command groups:
+
+### Network Interaction
+
+- **[sui client](./client)** - Client for interacting with the Sui network
+  - Manage addresses and environments
+  - Query objects and balances
+  - Execute transactions
+  - Call Move functions
+
+### Move Development
+
+- **[sui move](./move)** - Tool to build and test Move applications
+  - Build Move packages
+  - Run tests
+  - Generate coverage reports
+  - Create new packages
+
+### Key Management
+
+- **[sui keytool](./keytool)** - Sui keystore tool for managing cryptographic keys
+  - Generate and import keys
+  - Sign transactions
+  - Manage MultiSig configurations
+  - ZkLogin operations
+
+### Validator Operations
+
+- **[sui validator](./validator)** - Tools for validators and validator candidates
+  - Join/leave validator committee
+  - Update validator metadata
+  - Manage gas prices
+  - Bridge committee operations
+
+### Network Setup
+
+- **[sui start](./start)** - Start a local Sui network
+- **[sui genesis](./genesis)** - Bootstrap and initialize a new Sui network
+
+## Common Workflows
+
+### Getting Started
+
+1. Install the Sui CLI
+2. Create a new address: `sui client new-address ed25519`
+3. Get test tokens from faucet: `sui client faucet`
+4. Check your balance: `sui client balance`
+
+### Deploying a Package
+
+1. Create a new Move package: `sui move new my_package`
+2. Build the package: `sui move build`
+3. Test the package: `sui move test`
+4. Publish to network: `sui client publish`
+
+### Running a Local Network
+
+1. Start a local network: `sui start`
+2. The network runs with default configuration
+3. Access via RPC at `http://127.0.0.1:9000`
+
+## Configuration
+
+The Sui CLI stores configuration in `~/.sui/sui_config/` by default:
+
+- `client.yaml` - Client configuration (active address, environments)
+- `sui.keystore` - Encrypted keystore for private keys
+- `sui.aliases` - Address aliases
+
+## Global Flags
+
+Most commands support these global flags:
+
+- `--json` - Return command outputs in JSON format
+- `--client.config` - Path to client configuration file
+- `--client.env` - Sui environment to use
+- `-y, --yes` - Accept defaults without prompting
+
+## Environment Variables
+
+Protocol configuration can be overridden for local networks:
+
+```bash
+# Enable protocol config overrides
+export SUI_PROTOCOL_CONFIG_OVERRIDE_ENABLE=1
+
+# Set specific parameters
+export SUI_PROTOCOL_CONFIG_OVERRIDE_min_checkpoint_interval_ms=1000
+```
+
+<Warning>
+Overriding protocol parameters should only be done in local development networks. Using incompatible values across nodes may cause network failures.
+</Warning>
+
+## Getting Help
+
+For detailed help on any command:
+
+```bash
+sui <command> --help
+sui <command> <subcommand> --help
+```
+
+For shell completion:
+
+```bash
+sui completion --generate <shell>
+```
+
+Supported shells: bash, zsh, fish, powershell, elvish

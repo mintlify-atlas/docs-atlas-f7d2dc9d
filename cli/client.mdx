@@ -1,0 +1,844 @@
+---
+title: sui client
+description: Client for interacting with the Sui network including managing addresses, querying data, and executing transactions
+---
+
+The `sui client` command provides tools for interacting with the Sui blockchain network.
+
+## Synopsis
+
+```bash
+sui client [OPTIONS] [COMMAND]
+```
+
+## Global Options
+
+<ParamField path="--client.config" type="path">
+  Path to client configuration file (default: `~/.sui/sui_config/client.yaml`)
+</ParamField>
+
+<ParamField path="--client.env" type="string">
+  The Sui environment to use (must be present in config file)
+</ParamField>
+
+<ParamField path="-y, --yes" type="boolean">
+  Create a new sui config without prompting if none exists
+</ParamField>
+
+<ParamField path="--json" type="boolean">
+  Return command outputs in JSON format
+</ParamField>
+
+## Commands
+
+### active-address
+
+Display the default address used for commands when none specified.
+
+```bash
+sui client active-address
+```
+
+**Example output:**
+```
+0x1a2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567890
+```
+
+### active-env
+
+Display the default environment used for commands when none specified.
+
+```bash
+sui client active-env
+```
+
+**Example output:**
+```
+testnet
+```
+
+### addresses
+
+Obtain the addresses managed by the client.
+
+```bash
+sui client addresses [OPTIONS]
+```
+
+<ParamField path="-s, --sort-by-alias" type="boolean">
+  Sort by alias instead of address
+</ParamField>
+
+**Example:**
+```bash
+sui client addresses
+sui client addresses --sort-by-alias
+```
+
+### balance
+
+List the coin balance of an address.
+
+```bash
+sui client balance [OPTIONS] [ADDRESS]
+```
+
+<ParamField path="ADDRESS" type="string">
+  Address or its alias. If not specified, uses active address
+</ParamField>
+
+<ParamField path="--coin-type" type="string">
+  Show balance for the specified coin (e.g., `0x2::sui::SUI`). Shows all coins if not specified
+</ParamField>
+
+<ParamField path="--with-coins" type="boolean">
+  Show a list with each coin's object ID and balance
+</ParamField>
+
+**Example:**
+```bash
+# Show all balances for active address
+sui client balance
+
+# Show SUI balance with individual coins
+sui client balance --coin-type 0x2::sui::SUI --with-coins
+
+# Check balance for specific address
+sui client balance 0xADDRESS
+```
+
+### call
+
+Call a Move function.
+
+```bash
+sui client call [OPTIONS]
+```
+
+<ParamField path="--package" type="ObjectID" required>
+  Object ID of the package containing the module
+</ParamField>
+
+<ParamField path="--module" type="string" required>
+  The name of the module in the package
+</ParamField>
+
+<ParamField path="--function" type="string" required>
+  Function name in module
+</ParamField>
+
+<ParamField path="--type-args" type="TypeTag[]">
+  Type arguments to the generic function. All must be specified
+</ParamField>
+
+<ParamField path="--args" type="SuiJsonValue[]">
+  Simplified ordered args like in the function syntax. ObjectIDs and addresses must be hex strings
+</ParamField>
+
+<ParamField path="--gas" type="ObjectID[]">
+  IDs of gas objects for payment. Auto-selected if not provided
+</ParamField>
+
+<ParamField path="--gas-budget" type="u64">
+  Gas budget for this transaction (in MIST). If not provided, performs dry run to estimate
+</ParamField>
+
+<ParamField path="--gas-price" type="u64">
+  Gas price for this transaction (in MIST). Uses reference gas price if not provided
+</ParamField>
+
+**Example:**
+```bash
+# Call a simple function
+sui client call \
+  --package 0x2 \
+  --module coin \
+  --function value \
+  --args 0xOBJECT_ID \
+  --gas-budget 10000000
+
+# Call with type arguments
+sui client call \
+  --package 0xPACKAGE \
+  --module nft \
+  --function mint \
+  --type-args 0x2::sui::SUI \
+  --args "NFT Name" "Description" \
+  --gas-budget 10000000
+```
+
+### chain-identifier
+
+Query the chain identifier from the RPC endpoint.
+
+```bash
+sui client chain-identifier
+```
+
+### dynamic-field
+
+Query dynamic fields by parent object address.
+
+```bash
+sui client dynamic-field <OBJECT_ID> [OPTIONS]
+```
+
+<ParamField path="OBJECT_ID" type="ObjectID" required>
+  The ID of the parent object
+</ParamField>
+
+<ParamField path="--cursor" type="string">
+  Optional paging cursor
+</ParamField>
+
+<ParamField path="--limit" type="u32" default="50">
+  Maximum items returned per page
+</ParamField>
+
+### envs
+
+List all Sui environments.
+
+```bash
+sui client envs
+```
+
+**Example output:**
+```
+╭──────────┬────────────────────────────────────────┬────────╮
+│ alias    │ rpc                                    │ active │
+├──────────┼────────────────────────────────────────┼────────┤
+│ devnet   │ https://fullnode.devnet.sui.io:443     │        │
+│ testnet  │ https://fullnode.testnet.sui.io:443    │ *      │
+│ mainnet  │ https://fullnode.mainnet.sui.io:443    │        │
+│ local    │ http://127.0.0.1:9000                  │        │
+╰──────────┴────────────────────────────────────────┴────────╯
+```
+
+### faucet
+
+Request gas coin from faucet.
+
+```bash
+sui client faucet [OPTIONS]
+```
+
+<ParamField path="--address" type="string">
+  Address or its alias. Uses active address if not specified
+</ParamField>
+
+<ParamField path="--url" type="string">
+  The url to the faucet. Auto-detected based on active network if not specified
+</ParamField>
+
+**Example:**
+```bash
+# Request tokens for active address
+sui client faucet
+
+# Request tokens for specific address
+sui client faucet --address my_address_alias
+```
+
+<Note>
+For testnet tokens, use the Web UI at https://faucet.sui.io/
+</Note>
+
+### gas
+
+Obtain all gas objects owned by an address.
+
+```bash
+sui client gas [ADDRESS]
+```
+
+<ParamField path="ADDRESS" type="string">
+  Address or its alias owning the objects. Uses active address if not specified
+</ParamField>
+
+### merge-coin
+
+Merge two coin objects into one coin.
+
+```bash
+sui client merge-coin [OPTIONS]
+```
+
+<ParamField path="--primary-coin" type="ObjectID" required>
+  The address of the coin to merge into
+</ParamField>
+
+<ParamField path="--coin-to-merge" type="ObjectID" required>
+  The address of the coin to be merged
+</ParamField>
+
+<ParamField path="--gas-budget" type="u64">
+  Gas budget for this transaction (in MIST)
+</ParamField>
+
+**Example:**
+```bash
+sui client merge-coin \
+  --primary-coin 0xCOIN1 \
+  --coin-to-merge 0xCOIN2 \
+  --gas-budget 5000000
+```
+
+### new-address
+
+Generate new address and keypair.
+
+```bash
+sui client new-address <KEY_SCHEME> [ALIAS] [WORD_LENGTH] [DERIVATION_PATH]
+```
+
+<ParamField path="KEY_SCHEME" type="string" required>
+  Keypair scheme: `ed25519`, `secp256k1`, or `secp256r1`
+</ParamField>
+
+<ParamField path="ALIAS" type="string">
+  Optional alias for the address. Must start with a letter and contain only letters, digits, hyphens (-), or underscores (_)
+</ParamField>
+
+<ParamField path="WORD_LENGTH" type="string">
+  Mnemonic word length: `word12`, `word15`, `word18`, `word21`, or `word24`. Default: `word12`
+</ParamField>
+
+<ParamField path="DERIVATION_PATH" type="string">
+  Optional derivation path. Defaults:
+  - ed25519: `m/44'/784'/0'/0'/0'`
+  - secp256k1: `m/54'/784'/0'/0/0`
+  - secp256r1: `m/74'/784'/0'/0/0`
+</ParamField>
+
+**Example:**
+```bash
+# Generate ed25519 address with default settings
+sui client new-address ed25519
+
+# Generate with custom alias
+sui client new-address ed25519 my_wallet
+
+# Generate with custom word length
+sui client new-address secp256k1 my_wallet word24
+```
+
+### new-env
+
+Add new Sui environment.
+
+```bash
+sui client new-env [OPTIONS]
+```
+
+<ParamField path="--alias" type="string" required>
+  Environment alias
+</ParamField>
+
+<ParamField path="--rpc" type="url" required>
+  RPC server URL
+</ParamField>
+
+<ParamField path="--ws" type="url">
+  WebSocket URL
+</ParamField>
+
+<ParamField path="--basic-auth" type="string">
+  Basic authentication in format `username:password`
+</ParamField>
+
+**Example:**
+```bash
+# Add testnet environment
+sui client new-env \
+  --alias testnet \
+  --rpc https://fullnode.testnet.sui.io:443
+
+# Add local network
+sui client new-env \
+  --alias local \
+  --rpc http://127.0.0.1:9000
+```
+
+### object
+
+Get object information.
+
+```bash
+sui client object <OBJECT_ID> [OPTIONS]
+```
+
+<ParamField path="OBJECT_ID" type="ObjectID" required>
+  Object ID of the object to fetch
+</ParamField>
+
+<ParamField path="--bcs" type="boolean">
+  Return the BCS serialized version of the object
+</ParamField>
+
+**Example:**
+```bash
+sui client object 0xOBJECT_ID
+sui client object 0xOBJECT_ID --bcs
+```
+
+### objects
+
+Obtain all objects owned by an address.
+
+```bash
+sui client objects [ADDRESS]
+```
+
+<ParamField path="ADDRESS" type="string">
+  Address owning the objects. Uses active address if not specified. Accepts address or alias
+</ParamField>
+
+### pay
+
+Pay coins to recipients following specified amounts.
+
+```bash
+sui client pay [OPTIONS]
+```
+
+<ParamField path="--input-coins" type="ObjectID[]" required>
+  The input coins to be used for pay recipients
+</ParamField>
+
+<ParamField path="--recipients" type="string[]" required>
+  The recipient addresses. Must be same length as amounts. Accepts addresses or aliases
+</ParamField>
+
+<ParamField path="--amounts" type="u64[]" required>
+  The amounts to be paid, following the order of recipients
+</ParamField>
+
+<ParamField path="--gas-budget" type="u64">
+  Gas budget for this transaction (in MIST)
+</ParamField>
+
+**Example:**
+```bash
+sui client pay \
+  --input-coins 0xCOIN1 0xCOIN2 \
+  --recipients 0xRECIPIENT1 0xRECIPIENT2 \
+  --amounts 1000000000 2000000000 \
+  --gas-budget 10000000
+```
+
+### pay-all-sui
+
+Pay all residual SUI coins to recipient, after deducting gas cost.
+
+```bash
+sui client pay-all-sui [OPTIONS]
+```
+
+<ParamField path="--input-coins" type="ObjectID[]" required>
+  The input coins including the gas coin
+</ParamField>
+
+<ParamField path="--recipient" type="string" required>
+  The recipient address or alias
+</ParamField>
+
+<ParamField path="--gas-budget" type="u64">
+  Gas budget for this transaction (in MIST)
+</ParamField>
+
+### pay-sui
+
+Pay SUI coins to recipients following specified amounts.
+
+```bash
+sui client pay-sui [OPTIONS]
+```
+
+<ParamField path="--input-coins" type="ObjectID[]" required>
+  The input coins including the gas coin
+</ParamField>
+
+<ParamField path="--recipients" type="string[]" required>
+  The recipient addresses. Must be same length as amounts
+</ParamField>
+
+<ParamField path="--amounts" type="u64[]" required>
+  The amounts to be paid
+</ParamField>
+
+<ParamField path="--gas-budget" type="u64">
+  Gas budget for this transaction (in MIST)
+</ParamField>
+
+### ptb
+
+Run a Programmable Transaction Block from provided arguments.
+
+```bash
+sui client ptb [PTB_ARGS]
+```
+
+See the PTB documentation for detailed syntax and examples.
+
+### publish
+
+Publish Move modules.
+
+```bash
+sui client publish [OPTIONS] [PACKAGE_PATH]
+```
+
+<ParamField path="PACKAGE_PATH" type="path" default=".">
+  Path to directory containing a Move package
+</ParamField>
+
+<ParamField path="--skip-dependency-verification" type="boolean">
+  Publish without checking whether dependency source code compiles to on-chain bytecode
+</ParamField>
+
+<ParamField path="--verify-deps" type="boolean">
+  Check that dependency source code compiles to on-chain bytecode before publishing
+</ParamField>
+
+<ParamField path="--with-unpublished-dependencies" type="boolean">
+  Also publish transitive dependencies that have not already been published
+</ParamField>
+
+<ParamField path="--gas-budget" type="u64">
+  Gas budget for this transaction (in MIST)
+</ParamField>
+
+**Example:**
+```bash
+# Publish package in current directory
+sui client publish --gas-budget 100000000
+
+# Publish with dependency verification
+sui client publish --verify-deps --gas-budget 100000000
+
+# Publish package at specific path
+sui client publish ./my_package --gas-budget 100000000
+```
+
+### remove-address
+
+Remove an existing address by its alias or hexadecimal string.
+
+```bash
+sui client remove-address <ALIAS_OR_ADDRESS>
+```
+
+### split-coin
+
+Split a coin object into multiple coins.
+
+```bash
+sui client split-coin [OPTIONS]
+```
+
+<ParamField path="--coin-id" type="ObjectID" required>
+  ID of the coin object to split
+</ParamField>
+
+<ParamField path="--amounts" type="u64[]">
+  Specific amounts to split out from the coin (mutually exclusive with --count)
+</ParamField>
+
+<ParamField path="--count" type="u64">
+  Count of equal-size coins to split into (mutually exclusive with --amounts)
+</ParamField>
+
+<ParamField path="--gas-budget" type="u64">
+  Gas budget for this transaction (in MIST)
+</ParamField>
+
+**Example:**
+```bash
+# Split into specific amounts
+sui client split-coin \
+  --coin-id 0xCOIN \
+  --amounts 1000000000 2000000000 3000000000 \
+  --gas-budget 10000000
+
+# Split into 5 equal parts
+sui client split-coin \
+  --coin-id 0xCOIN \
+  --count 5 \
+  --gas-budget 10000000
+```
+
+### switch
+
+Switch active address and/or network environment.
+
+```bash
+sui client switch [OPTIONS]
+```
+
+<ParamField path="--address" type="string">
+  Address or alias to use as active address
+</ParamField>
+
+<ParamField path="--env" type="string">
+  The RPC server environment to use
+</ParamField>
+
+**Example:**
+```bash
+# Switch environment
+sui client switch --env testnet
+
+# Switch address
+sui client switch --address my_wallet
+
+# Switch both
+sui client switch --env mainnet --address my_main_wallet
+```
+
+### transfer
+
+Transfer object to an address.
+
+```bash
+sui client transfer [OPTIONS]
+```
+
+<ParamField path="--to" type="string" required>
+  Recipient address or its alias
+</ParamField>
+
+<ParamField path="--object-id" type="ObjectID" required>
+  ID of the object to transfer
+</ParamField>
+
+<ParamField path="--gas-budget" type="u64">
+  Gas budget for this transaction (in MIST)
+</ParamField>
+
+**Example:**
+```bash
+sui client transfer \
+  --to 0xRECIPIENT \
+  --object-id 0xOBJECT \
+  --gas-budget 10000000
+```
+
+### transfer-sui
+
+Transfer SUI, and pay gas with the same SUI coin object.
+
+```bash
+sui client transfer-sui [OPTIONS]
+```
+
+<ParamField path="--to" type="string" required>
+  Recipient address or its alias
+</ParamField>
+
+<ParamField path="--sui-coin-object-id" type="ObjectID" required>
+  ID of the coin to transfer (also used as gas)
+</ParamField>
+
+<ParamField path="--amount" type="u64">
+  The amount to transfer. If not specified, the entire coin object will be transferred
+</ParamField>
+
+<ParamField path="--gas-budget" type="u64">
+  Gas budget for this transaction (in MIST)
+</ParamField>
+
+**Example:**
+```bash
+# Transfer specific amount
+sui client transfer-sui \
+  --to 0xRECIPIENT \
+  --sui-coin-object-id 0xCOIN \
+  --amount 1000000000 \
+  --gas-budget 10000000
+
+# Transfer entire coin
+sui client transfer-sui \
+  --to 0xRECIPIENT \
+  --sui-coin-object-id 0xCOIN \
+  --gas-budget 10000000
+```
+
+### tx-block
+
+Get the effects of executing a transaction block.
+
+```bash
+sui client tx-block <DIGEST>
+```
+
+<ParamField path="DIGEST" type="TransactionDigest" required>
+  Digest of the transaction block
+</ParamField>
+
+### upgrade
+
+Upgrade Move modules.
+
+```bash
+sui client upgrade [OPTIONS] [PACKAGE_PATH]
+```
+
+<ParamField path="PACKAGE_PATH" type="path" default=".">
+  Path to directory containing a Move package
+</ParamField>
+
+<ParamField path="-c, --upgrade-capability" type="ObjectID">
+  ID of the upgrade capability for the package being upgraded
+</ParamField>
+
+<ParamField path="--skip-dependency-verification" type="boolean">
+  Upgrade without checking whether dependency source code compiles to on-chain bytecode
+</ParamField>
+
+<ParamField path="--with-unpublished-dependencies" type="boolean">
+  Also publish transitive dependencies that have not already been published
+</ParamField>
+
+<ParamField path="--gas-budget" type="u64">
+  Gas budget for this transaction (in MIST)
+</ParamField>
+
+**Example:**
+```bash
+sui client upgrade \
+  --upgrade-capability 0xCAP_ID \
+  --gas-budget 100000000
+```
+
+### verify-bytecode-meter
+
+Run the bytecode verifier on a package.
+
+```bash
+sui client verify-bytecode-meter [OPTIONS]
+```
+
+<ParamField path="--package" type="path">
+  Path to directory containing a Move package (defaults to current directory)
+</ParamField>
+
+<ParamField path="--protocol-version" type="u64">
+  Protocol version to use for the bytecode verifier (defaults to latest)
+</ParamField>
+
+<ParamField path="--module" type="path[]">
+  Paths to specific pre-compiled module bytecode to verify. Can be specified multiple times
+</ParamField>
+
+### verify-source
+
+Verify local Move packages against on-chain packages.
+
+```bash
+sui client verify-source [OPTIONS] [PACKAGE_PATH]
+```
+
+<ParamField path="PACKAGE_PATH" type="path" default=".">
+  Path to directory containing a Move package
+</ParamField>
+
+<ParamField path="--verify-deps" type="boolean">
+  Verify on-chain dependencies
+</ParamField>
+
+<ParamField path="--skip-source" type="boolean">
+  Don't verify source (only valid if --verify-deps is enabled)
+</ParamField>
+
+<ParamField path="--address-override" type="ObjectID">
+  Override addresses for the package's own modules. Only works for unpublished modules (whose addresses are 0x0)
+</ParamField>
+
+## Transaction Processing Options
+
+Many commands support these transaction processing options:
+
+<ParamField path="--tx-digest" type="boolean">
+  Compute the transaction digest and print it, but do not execute
+</ParamField>
+
+<ParamField path="--dry-run" type="boolean">
+  Perform a dry run of the transaction without executing it
+</ParamField>
+
+<ParamField path="--dev-inspect" type="boolean">
+  Perform a dev inspect on the transaction
+</ParamField>
+
+<ParamField path="--serialize-unsigned-transaction" type="boolean">
+  Serialize the BCS bytes of unsigned transaction data and print as Base64. Can be used with `execute-signed-tx`
+</ParamField>
+
+<ParamField path="--serialize-signed-transaction" type="boolean">
+  Serialize the BCS bytes of signed transaction data and print as Base64. Can be used with `execute-combined-signed-tx`
+</ParamField>
+
+<ParamField path="--sender" type="SuiAddress">
+  Set the transaction sender to this address
+</ParamField>
+
+## Examples
+
+### Complete Workflow: Creating and Funding an Address
+
+```bash
+# Create new address
+sui client new-address ed25519 my_wallet
+
+# Set as active
+sui client switch --address my_wallet
+
+# Request faucet tokens (on devnet/testnet)
+sui client faucet
+
+# Check balance
+sui client balance
+
+# View gas objects
+sui client gas
+```
+
+### Publishing and Interacting with a Package
+
+```bash
+# Build and publish
+cd my_package
+sui move build
+sui client publish --gas-budget 100000000
+
+# Note the package ID from output, then call a function
+sui client call \
+  --package 0xPACKAGE_ID \
+  --module my_module \
+  --function my_function \
+  --gas-budget 10000000
+```
+
+### Working with Coins
+
+```bash
+# Split a coin
+sui client split-coin \
+  --coin-id 0xCOIN \
+  --amounts 1000000000 2000000000 \
+  --gas-budget 5000000
+
+# Merge coins
+sui client merge-coin \
+  --primary-coin 0xCOIN1 \
+  --coin-to-merge 0xCOIN2 \
+  --gas-budget 5000000
+
+# Transfer SUI
+sui client transfer-sui \
+  --to 0xRECIPIENT \
+  --sui-coin-object-id 0xCOIN \
+  --amount 1000000000 \
+  --gas-budget 5000000
+```

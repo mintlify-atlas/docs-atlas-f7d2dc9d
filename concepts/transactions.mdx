@@ -1,0 +1,415 @@
+---
+title: Transaction Structure and Types
+description: Learn about Sui's transaction model, including programmable transactions, transaction structure, and different transaction types.
+---
+
+Sui's transaction model is unique in its support for **Programmable Transaction Blocks (PTBs)**, which allow you to chain multiple operations together atomically. This enables complex operations to be executed efficiently in a single transaction.
+
+## Transaction Types
+
+Sui supports several types of transactions:
+
+```rust filename="crates/sui-types/src/transaction.rs"
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, IntoStaticStr)]
+pub enum TransactionKind {
+    /// A transaction that allows the interleaving of native commands and Move calls
+    ProgrammableTransaction(ProgrammableTransaction),
+    /// A system transaction that will update epoch information on-chain.
+    ChangeEpoch(ChangeEpoch),
+    Genesis(GenesisTransaction),
+    ConsensusCommitPrologue(ConsensusCommitPrologue),
+    AuthenticatorStateUpdate(AuthenticatorStateUpdate),
+    EndOfEpochTransaction(Vec<EndOfEpochTransactionKind>),
+    RandomnessStateUpdate(RandomnessStateUpdate),
+    ConsensusCommitPrologueV2(ConsensusCommitPrologueV2),
+    ConsensusCommitPrologueV3(ConsensusCommitPrologueV3),
+    ConsensusCommitPrologueV4(ConsensusCommitPrologueV4),
+    /// A system transaction that is expressed as a PTB
+    ProgrammableSystemTransaction(ProgrammableTransaction),
+}
+```
+
+<CardGroup cols={2}>
+  <Card title="Programmable Transactions" icon="code">
+    User-initiated transactions that can chain multiple commands
+  </Card>
+  <Card title="System Transactions" icon="server">
+    Special transactions for epoch changes and system state updates
+  </Card>
+  <Card title="Genesis Transaction" icon="rocket">
+    One-time transaction that initializes the network
+  </Card>
+  <Card title="Consensus Updates" icon="arrows-rotate">
+    Transactions that update consensus-related state
+  </Card>
+</CardGroup>
+
+## Programmable Transaction Blocks
+
+Programmable transactions are the primary transaction type for users and applications.
+
+### Transaction Arguments
+
+Transactions can take three types of arguments:
+
+```rust filename="crates/sui-types/src/transaction.rs"
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+pub enum CallArg {
+    // contains no structs or objects
+    Pure(Vec<u8>),
+    // an object
+    Object(ObjectArg),
+    // Reservation to withdraw balance from a funds accumulator
+    FundsWithdrawal(FundsWithdrawalArg),
+}
+```
+
+<Tabs>
+  <Tab title="Pure Arguments">
+    Pure values like numbers, strings, or addresses encoded as bytes:
+    
+    ```typescript
+    const tx = new Transaction();
+    tx.moveCall({
+        target: '0x2::coin::split',
+        arguments: [
+            tx.object(coinId),
+            tx.pure.u64(1000), // Pure argument
+        ],
+    });
+    ```
+  </Tab>
+  
+  <Tab title="Object Arguments">
+    References to on-chain objects:
+    
+    ```rust filename="crates/sui-types/src/transaction.rs"
+    pub enum ObjectArg {
+        // A Move object from fastpath
+        ImmOrOwnedObject(ObjectRef),
+        // A Move object from consensus
+        SharedObject {
+            id: ObjectID,
+            initial_shared_version: SequenceNumber,
+            mutability: SharedObjectMutability,
+        },
+        // A Move object that can be received in this transaction
+        Receiving(ObjectRef),
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Funds Withdrawal">
+    Withdraw from address balance accumulators:
+    
+    ```rust filename="crates/sui-types/src/transaction.rs"
+    pub struct FundsWithdrawalArg {
+        /// The reservation of the funds accumulator to withdraw
+        pub reservation: Reservation,
+        /// The type argument of the funds accumulator to withdraw
+        pub type_arg: WithdrawalTypeArg,
+        /// The source of the funds to withdraw
+        pub withdraw_from: WithdrawFrom,
+    }
+    
+    pub enum WithdrawFrom {
+        /// Withdraw from the sender of the transaction
+        Sender,
+        /// Withdraw from the sponsor of the transaction (gas owner)
+        Sponsor,
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Transaction Structure
+
+Every transaction contains:
+
+<AccordionGroup>
+  <Accordion title="Sender">
+    The address that signed and submitted the transaction
+  </Accordion>
+  
+  <Accordion title="Gas Payment">
+    One or more coin objects used to pay for gas
+  </Accordion>
+  
+  <Accordion title="Gas Budget">
+    Maximum amount of gas the transaction can consume
+  </Accordion>
+  
+  <Accordion title="Gas Price">
+    Price per unit of gas in MIST (1 SUI = 1B MIST)
+  </Accordion>
+  
+  <Accordion title="Transaction Kind">
+    The type and content of the transaction (programmable, system, etc.)
+  </Accordion>
+  
+  <Accordion title="Expiration">
+    Optional epoch after which the transaction becomes invalid
+  </Accordion>
+</AccordionGroup>
+
+## Entry Functions
+
+Entry functions are special Move functions that can be called directly from transactions:
+
+```move filename="examples/move/entry_functions/sources/example.move"
+/// Entry functions can accept a reference to the `TxContext`
+/// (mutable or immutable) as their last parameter.
+entry fun share(bar: u64, ctx: &mut TxContext) {
+    transfer::share_object(Foo {
+        id: object::new(ctx),
+        bar,
+    })
+}
+
+/// Parameters passed to entry functions called in a programmable
+/// transaction block must be inputs to the transaction block,
+/// and not results of previous transactions.
+entry fun update(foo: &mut Foo, ctx: &TxContext) {
+    foo.bar = ctx.epoch();
+}
+
+/// Entry functions can return types that have `drop`.
+entry fun bar(foo: &Foo): u64 {
+    foo.bar
+}
+```
+
+### Entry Function Rules
+
+<Note>
+  Entry functions have special restrictions:
+  - Can only return types with `drop` ability
+  - Parameters in PTBs must be transaction inputs, not results from previous commands
+  - Must have `entry` visibility modifier
+</Note>
+
+## Public Functions vs Entry Functions
+
+<Tabs>
+  <Tab title="Public Functions">
+    Can be called from other Move modules and chained in PTBs:
+    
+    ```move filename="examples/move/entry_functions/sources/example.move"
+    /// This function cannot be `entry` because it returns a value
+    /// that does not have `drop`.
+    public fun foo(ctx: &mut TxContext): Foo {
+        Foo { id: object::new(ctx), bar: 0 }
+    }
+    ```
+    
+    - Can return any type
+    - Results can be passed to subsequent commands
+    - More flexible for composition
+  </Tab>
+  
+  <Tab title="Entry Functions">
+    Can be called directly from transactions but with limitations:
+    
+    ```move
+    entry fun create_and_transfer(value: u64, recipient: address, ctx: &mut TxContext) {
+        let obj = Object { id: object::new(ctx), value };
+        transfer::public_transfer(obj, recipient);
+    }
+    ```
+    
+    - Can only return types with `drop`
+    - Cannot chain results in PTBs
+    - Simpler for end users
+  </Tab>
+</Tabs>
+
+## Transaction Commands
+
+Programmable transactions support various native commands:
+
+<CardGroup cols={2}>
+  <Card title="MoveCall" icon="function">
+    Call a Move function
+  </Card>
+  <Card title="TransferObjects" icon="arrow-right">
+    Transfer objects to addresses
+  </Card>
+  <Card title="SplitCoins" icon="scissors">
+    Split coin into multiple coins
+  </Card>
+  <Card title="MergeCoins" icon="compress">
+    Merge multiple coins into one
+  </Card>
+  <Card title="Publish" icon="upload">
+    Publish a new Move package
+  </Card>
+  <Card title="MakeMoveVec" icon="list">
+    Create a vector of Move values
+  </Card>
+  <Card title="Upgrade" icon="arrow-up">
+    Upgrade an existing package
+  </Card>
+</CardGroup>
+
+## Shared Object Example
+
+Here's a practical example using a shared counter:
+
+```move filename="examples/move/basics/sources/counter.move"
+/// This example demonstrates a basic use of a shared object.
+/// Rules:
+/// - anyone can create and share a counter
+/// - everyone can increment a counter by 1
+/// - the owner of the counter can reset it to any value
+module basics::counter {
+    /// A shared counter.
+    public struct Counter has key {
+        id: UID,
+        owner: address,
+        value: u64,
+    }
+
+    /// Create and share a Counter object.
+    public fun create(ctx: &mut TxContext) {
+        transfer::share_object(Counter {
+            id: object::new(ctx),
+            owner: ctx.sender(),
+            value: 0,
+        })
+    }
+
+    /// Increment a counter by 1.
+    public fun increment(counter: &mut Counter) {
+        counter.value = counter.value + 1;
+    }
+
+    /// Set value (only runnable by the Counter owner)
+    public fun set_value(counter: &mut Counter, value: u64, ctx: &TxContext) {
+        assert!(counter.owner == ctx.sender());
+        counter.value = value;
+    }
+}
+```
+
+## Gas Configuration
+
+From the source code:
+
+```rust filename="crates/sui-types/src/transaction.rs"
+pub const TEST_ONLY_GAS_UNIT_FOR_TRANSFER: u64 = 10_000;
+pub const TEST_ONLY_GAS_UNIT_FOR_OBJECT_BASICS: u64 = 50_000;
+pub const TEST_ONLY_GAS_UNIT_FOR_PUBLISH: u64 = 70_000;
+pub const TEST_ONLY_GAS_UNIT_FOR_STAKING: u64 = 50_000;
+pub const TEST_ONLY_GAS_UNIT_FOR_GENERIC: u64 = 50_000;
+pub const TEST_ONLY_GAS_UNIT_FOR_SPLIT_COIN: u64 = 10_000;
+pub const TEST_ONLY_GAS_UNIT_FOR_HEAVY_COMPUTATION_STORAGE: u64 = 5_000_000;
+
+pub const GAS_PRICE_FOR_SYSTEM_TX: u64 = 1;
+pub const DEFAULT_VALIDATOR_GAS_PRICE: u64 = 1000;
+```
+
+## Type Argument Validation
+
+Sui validates type arguments to prevent abuse:
+
+```rust filename="crates/sui-types/src/transaction.rs"
+fn type_input_validity_check(
+    tag: &TypeInput,
+    config: &ProtocolConfig,
+    starting_count: &mut usize,
+) -> UserInputResult<()> {
+    let mut stack = vec![(tag, 1)];
+    while let Some((tag, depth)) = stack.pop() {
+        *starting_count += 1;
+        fp_ensure!(
+            *starting_count < config.max_type_arguments() as usize,
+            UserInputError::SizeLimitExceeded {
+                limit: "maximum type arguments in a call transaction".to_string(),
+                value: config.max_type_arguments().to_string()
+            }
+        );
+        fp_ensure!(
+            depth < config.max_type_argument_depth(),
+            UserInputError::SizeLimitExceeded {
+                limit: "maximum type argument depth in a call transaction".to_string(),
+                value: config.max_type_argument_depth().to_string()
+            }
+        );
+        // ... validation logic
+    }
+    Ok(())
+}
+```
+
+## End-of-Epoch Transactions
+
+Special transactions that run at epoch boundaries:
+
+```rust filename="crates/sui-types/src/transaction.rs"
+pub enum EndOfEpochTransactionKind {
+    ChangeEpoch(ChangeEpoch),
+    AuthenticatorStateCreate,
+    AuthenticatorStateExpire(AuthenticatorStateExpire),
+    RandomnessStateCreate,
+    DenyListStateCreate,
+    BridgeStateCreate(ChainIdentifier),
+    BridgeCommitteeInit(SequenceNumber),
+    StoreExecutionTimeObservations(StoredExecutionTimeObservations),
+    AccumulatorRootCreate,
+    CoinRegistryCreate,
+    DisplayRegistryCreate,
+    AddressAliasStateCreate,
+    WriteAccumulatorStorageCost(WriteAccumulatorStorageCost),
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use programmable transactions">
+    Combine multiple operations in a single transaction for atomicity:
+    
+    ```typescript
+    const tx = new Transaction();
+    const [coin] = tx.splitCoins(tx.gas, [1000]);
+    tx.moveCall({
+        target: `${packageId}::my_module::do_something`,
+        arguments: [tx.object(objectId), coin],
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Set appropriate gas budgets">
+    Set gas budgets high enough to cover execution but not wastefully high:
+    - Simple transfers: ~1M gas units
+    - Complex operations: ~10M+ gas units
+    - Package publishing: ~100M+ gas units
+  </Accordion>
+  
+  <Accordion title="Handle gas price correctly">
+    Use current reference gas price or higher:
+    
+    ```typescript
+    const gasPrice = await client.getReferenceGasPrice();
+    tx.setGasPrice(gasPrice);
+    ```
+  </Accordion>
+  
+  <Accordion title="Minimize shared object usage">
+    Shared objects require consensus and are slower. Prefer owned objects when possible.
+  </Accordion>
+</AccordionGroup>
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="Transaction Lifecycle" href="/concepts/transaction-lifecycle" icon="clock">
+    Understand transaction execution flow
+  </Card>
+  <Card title="Gas Pricing" href="/concepts/gas-pricing" icon="gas-pump">
+    Learn about gas costs
+  </Card>
+  <Card title="Sponsored Transactions" href="/concepts/sponsored-transactions" icon="hand-holding-dollar">
+    Enable gasless transactions
+  </Card>
+</CardGroup>

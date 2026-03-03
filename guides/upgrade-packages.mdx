@@ -1,0 +1,513 @@
+---
+title: Upgrading Packages
+description: Learn how to safely upgrade Move packages on Sui
+---
+
+Sui allows you to upgrade published packages while maintaining compatibility and security. This guide covers upgrade strategies and best practices.
+
+## Upgrade Basics
+
+When you publish a package on Sui, you receive an `UpgradeCap` that allows you to publish new versions.
+
+### Publishing with Upgrade Capability
+
+```bash
+sui client publish --gas-budget 100000000
+```
+
+This creates:
+- Published package at address `0xPACKAGE_ID`
+- `UpgradeCap` object sent to publisher
+
+### Upgrade Policies
+
+Sui enforces three upgrade policies:
+
+1. **Compatible**: Most restrictive, safest
+   - Can only add new functions and structs
+   - Cannot modify existing public functions
+   - Cannot change struct definitions
+
+2. **Additive**: Middle ground
+   - Can add abilities to structs
+   - Can change private function signatures
+   - Can add new public functions
+
+3. **Dependency-only**: Least restrictive
+   - Can make breaking changes
+   - Only affects modules that depend on this package
+
+## Upgrading a Package
+
+### Step 1: Modify your code
+
+Update your Move code with new features:
+
+```move
+module my_package::example {
+    public struct MyObject has key, store {
+        id: UID,
+        value: u64,
+        // New field in upgrade
+        name: String,  // Added in v2
+    }
+
+    // Existing function (unchanged)
+    public fun get_value(obj: &MyObject): u64 {
+        obj.value
+    }
+
+    // New function in upgrade
+    public fun get_name(obj: &MyObject): String {
+        obj.name
+    }
+}
+```
+
+### Step 2: Build the upgrade
+
+```bash
+sui move build
+```
+
+### Step 3: Authorize upgrade
+
+Publish the new version:
+
+```bash
+sui client upgrade \
+  --upgrade-capability 0xUPGRADE_CAP_ID \
+  --gas-budget 100000000
+```
+
+The package will be published at a new address, but the original address remains as a reference.
+
+## Compatible Upgrades
+
+Safe changes that don't break existing code:
+
+### ✅ Adding new functions
+
+```move
+// v1
+module my_package::math {
+    public fun add(a: u64, b: u64): u64 {
+        a + b
+    }
+}
+
+// v2 - Added multiplication
+module my_package::math {
+    public fun add(a: u64, b: u64): u64 {
+        a + b
+    }
+
+    // New function
+    public fun multiply(a: u64, b: u64): u64 {
+        a * b
+    }
+}
+```
+
+### ✅ Adding new structs
+
+```move
+// v1
+module my_package::objects {
+    public struct ObjectA has key { /* ... */ }
+}
+
+// v2 - Added new struct
+module my_package::objects {
+    public struct ObjectA has key { /* ... */ }
+
+    // New struct
+    public struct ObjectB has key, store {
+        id: UID,
+        value: u64,
+    }
+}
+```
+
+### ✅ Adding private functions
+
+```move
+// v2 - Added helper
+module my_package::example {
+    public fun public_function() { /* ... */ }
+
+    // New private helper
+    fun internal_helper() {
+        // ...
+    }
+}
+```
+
+## Incompatible Changes
+
+Changes that break compatibility:
+
+### ❌ Changing public function signatures
+
+```move
+// v1
+public fun transfer(obj: MyObject, recipient: address) { /* ... */ }
+
+// v2 - BREAKING: Changed signature
+public fun transfer(
+    obj: MyObject,
+    recipient: address,
+    fee: u64  // New parameter breaks compatibility
+) { /* ... */ }
+```
+
+### ❌ Removing public functions
+
+```move
+// v1
+public fun old_function() { /* ... */ }
+
+// v2 - BREAKING: Function removed
+// Removed old_function - breaks compatibility
+```
+
+### ❌ Modifying struct definitions
+
+```move
+// v1
+public struct MyObject has key, store {
+    id: UID,
+    value: u64,
+}
+
+// v2 - BREAKING: Changed fields
+public struct MyObject has key, store {
+    id: UID,
+    amount: u64,  // Renamed field breaks compatibility
+}
+```
+
+## Migration Strategies
+
+### Strategy 1: Additive Only
+
+Add new functionality without changing existing code:
+
+```move
+// v1
+module my_package::token {
+    public struct Token has key, store {
+        id: UID,
+        balance: u64,
+    }
+
+    public fun balance(token: &Token): u64 {
+        token.balance
+    }
+}
+
+// v2 - Add new features
+module my_package::token {
+    public struct Token has key, store {
+        id: UID,
+        balance: u64,
+    }
+
+    // Keep existing function
+    public fun balance(token: &Token): u64 {
+        token.balance
+    }
+
+    // Add new token type
+    public struct PremiumToken has key, store {
+        id: UID,
+        balance: u64,
+        bonus: u64,
+    }
+
+    // New functions for premium tokens
+    public fun premium_balance(token: &PremiumToken): u64 {
+        token.balance + token.bonus
+    }
+}
+```
+
+### Strategy 2: Wrapper Pattern
+
+Wrap old structs in new versions:
+
+```move
+// v1
+public struct ConfigV1 has key {
+    id: UID,
+    value: u64,
+}
+
+// v2 - Wrap old version
+public struct ConfigV2 has key {
+    id: UID,
+    v1: ConfigV1,  // Embed old version
+    new_field: String,
+}
+
+public fun migrate_to_v2(
+    old: ConfigV1,
+    new_field: String,
+    ctx: &mut TxContext
+): ConfigV2 {
+    ConfigV2 {
+        id: object::new(ctx),
+        v1: old,
+        new_field,
+    }
+}
+```
+
+### Strategy 3: Versioned Modules
+
+Create separate modules for major versions:
+
+```move
+// sources/token_v1.move
+module my_package::token_v1 {
+    public struct Token has key, store { /* ... */ }
+    // v1 functions
+}
+
+// sources/token_v2.move  
+module my_package::token_v2 {
+    public struct Token has key, store { /* ... */ }
+    // v2 functions with improvements
+
+    // Migration function
+    public fun upgrade_from_v1(
+        old_token: token_v1::Token
+    ): Token {
+        // Convert v1 to v2
+    }
+}
+```
+
+## Using Dynamic Fields for Upgrades
+
+Add data to existing objects without changing struct:
+
+```move
+use sui::dynamic_field as df;
+
+// v1 - Original object
+public struct Game has key {
+    id: UID,
+    score: u64,
+}
+
+// v2 - Add features via dynamic fields
+public fun add_multiplayer_support(game: &mut Game) {
+    df::add(&mut game.id, b"players", vector::empty<address>());
+    df::add(&mut game.id, b"max_players", 4u8);
+}
+
+public fun add_player(game: &mut Game, player: address) {
+    let players = df::borrow_mut<vector<u8>, vector<address>>(
+        &mut game.id,
+        b"players"
+    );
+    vector::push_back(players, player);
+}
+```
+
+## Managing UpgradeCap
+
+### Check upgrade capability
+
+```bash
+# List objects you own
+sui client objects
+
+# Look for UpgradeCap
+# ObjectID: 0x...
+# Type: 0x2::package::UpgradeCap
+```
+
+### Transfer upgrade rights
+
+```bash
+sui client transfer \
+  --object-id 0xUPGRADE_CAP_ID \
+  --to 0xNEW_ADMIN_ADDRESS \
+  --gas-budget 10000000
+```
+
+### Make package immutable
+
+Burn the UpgradeCap to prevent future upgrades:
+
+```move
+use sui::package;
+
+public fun make_immutable(cap: UpgradeCap) {
+    package::make_immutable(cap);
+}
+```
+
+Or via CLI:
+
+```bash
+sui client call \
+  --package 0x2 \
+  --module package \
+  --function make_immutable \
+  --args 0xUPGRADE_CAP_ID \
+  --gas-budget 10000000
+```
+
+## Testing Upgrades
+
+### Test upgrade compatibility
+
+```bash
+# Build with compatibility check
+sui move build --skip-fetch-latest-git-deps
+```
+
+### Simulate upgrade locally
+
+1. Publish v1 on localnet
+2. Make changes
+3. Test upgrade
+4. Verify old objects still work
+5. Test new functionality
+
+## Best Practices
+
+### 1. Plan for upgrades from the start
+
+```move
+// Design extensible structs
+public struct Config has key {
+    id: UID,
+    // Use dynamic fields for future extensions
+}
+
+// Version your APIs
+public fun create_v1(/* ... */) { /* ... */ }
+```
+
+### 2. Document breaking changes
+
+```move
+/// @deprecated Use transfer_v2 instead
+public fun transfer_v1(/* ... */) { /* ... */ }
+
+/// Enhanced transfer with fee support (v2)
+public fun transfer_v2(/* ... */) { /* ... */ }
+```
+
+### 3. Provide migration paths
+
+```move
+/// Upgrade old NFT to new version with metadata
+public fun upgrade_nft(
+    old_nft: OldNFT,
+    metadata: Metadata,
+    ctx: &mut TxContext
+): NewNFT {
+    // Migration logic
+}
+```
+
+### 4. Use semantic versioning
+
+```toml
+[package]
+name = "my_package"
+version = "2.1.0"  # Major.Minor.Patch
+```
+
+### 5. Test thoroughly before upgrading
+
+- Test on devnet first
+- Verify all existing functionality works
+- Test new features
+- Check gas costs
+
+## Common Upgrade Patterns
+
+### Adding optional features
+
+```move
+// v1
+public struct Item has key, store {
+    id: UID,
+    name: String,
+}
+
+// v2 - Add optional metadata
+public fun add_metadata(item: &mut Item, key: String, value: String) {
+    df::add(&mut item.id, key, value);
+}
+```
+
+### Deprecating old functions
+
+```move
+/// @deprecated Use new_function instead
+public fun old_function() {
+    // Keep for compatibility
+}
+
+/// Improved version with better performance
+public fun new_function() {
+    // New implementation
+}
+```
+
+### Supporting multiple versions
+
+```move
+public fun process_v1(obj: &ObjectV1) { /* ... */ }
+public fun process_v2(obj: &ObjectV2) { /* ... */ }
+
+// Unified interface
+public fun process(obj: &Object) {
+    if (is_v1(obj)) {
+        process_v1(as_v1(obj))
+    } else {
+        process_v2(as_v2(obj))
+    }
+}
+```
+
+## Troubleshooting
+
+### Upgrade fails with compatibility error
+
+Check what changed:
+
+```bash
+sui move build --dump-bytecode-as-base64
+```
+
+Revert breaking changes or use a less restrictive policy.
+
+### Lost UpgradeCap
+
+If you lose the UpgradeCap, you cannot upgrade. Options:
+- Deploy as new package
+- Implement migration functions in v1
+
+### Old objects incompatible
+
+Provide migration functions:
+
+```move
+public fun migrate_object(old: OldObject): NewObject {
+    // Convert old to new
+}
+```
+
+## Next Steps
+
+- [Learn about programmable transactions](/guides/programmable-transactions)
+- [Explore package management](https://docs.sui.io/concepts/sui-move-concepts/packages)
+- [Read about package upgrades](https://docs.sui.io/concepts/sui-move-concepts/packages/upgrade)

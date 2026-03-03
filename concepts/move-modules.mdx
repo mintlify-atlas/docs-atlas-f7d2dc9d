@@ -1,0 +1,255 @@
+---
+title: Move Modules
+description: Learn how to organize and structure Move code with modules, packages, and dependencies.
+---
+
+Modules are the fundamental building blocks of Move code on Sui. They encapsulate types, functions, and logic into reusable components.
+
+## Module Structure
+
+```move
+module package_name::module_name {
+    // Imports
+    use sui::object::{Self, UID};
+    use sui::tx_context::TxContext;
+
+    // Friend declarations
+    friend package_name::trusted_module;
+
+    // Constants
+    const ENotAuthorized: u64 = 0;
+
+    // Structs
+    public struct MyStruct has key {
+        id: UID,
+        value: u64,
+    }
+
+    // Functions
+    public fun create(ctx: &mut TxContext): MyStruct {
+        MyStruct {
+            id: object::new(ctx),
+            value: 0,
+        }
+    }
+
+    // Init function (runs once at publish)
+    fun init(ctx: &mut TxContext) {
+        // Initialization logic
+    }
+}
+```
+
+## Module Naming
+
+Modules follow the format `address::module_name`:
+
+```move
+// Named address
+module my_package::game {
+    // ...
+}
+
+// Literal address
+module 0x123::utils {
+    // ...
+}
+```
+
+## Imports
+
+### Using Other Modules
+
+```move
+// Import entire module
+use sui::transfer;
+use sui::object;
+
+// Import specific items
+use sui::object::{UID, ID};
+
+// Import with alias
+use sui::tx_context::{Self, TxContext};
+use std::vector as vec;
+
+// Import multiple items
+use sui::coin::{Self, Coin, TreasuryCap};
+```
+
+### Public Use (Re-exports)
+
+```move
+/// Allows calling `.to_string()` on a vector
+public use fun std::string::utf8 as vector.to_string;
+```
+
+## Visibility
+
+<Tabs>
+  <Tab title="Private (Default)">
+    ```move
+    // Only visible within the module
+    fun internal_function() {
+        // ...
+    }
+    
+    struct InternalStruct {
+        value: u64,
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Public">
+    ```move
+    // Visible to all modules
+    public fun public_function() {
+        // ...
+    }
+    
+    public struct PublicStruct has store {
+        value: u64,
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Public(package)">
+    ```move
+    // Visible only to modules in the same package
+    public(package) fun package_function() {
+        // ...
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Entry">
+    ```move
+    // Callable from transactions
+    entry fun transaction_entry() {
+        // ...
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Init Function
+
+The `init` function runs once when a module is published:
+
+```move filename="examples/move/coin/sources/my_coin.move"
+public struct MY_COIN has drop {}
+
+fun init(witness: MY_COIN, ctx: &mut TxContext) {
+    let (treasury, metadata) = coin::create_currency(
+        witness,
+        6,
+        b"MY_COIN",
+        b"",
+        b"",
+        option::none(),
+        ctx,
+    );
+    transfer::public_freeze_object(metadata);
+    transfer::public_transfer(treasury, ctx.sender())
+}
+```
+
+<Note>
+  The `init` function receives a one-time witness (a struct with the same name as the module) that can be used for privileged operations like creating currencies.
+</Note>
+
+## Friend Modules
+
+```move
+module my_package::bank {
+    friend my_package::admin;
+    
+    public(package) fun privileged_operation() {
+        // Only callable by friends
+    }
+}
+
+module my_package::admin {
+    use my_package::bank;
+    
+    public fun admin_action() {
+        bank::privileged_operation();
+    }
+}
+```
+
+## Package Organization
+
+Packages contain multiple modules:
+
+```
+my_package/
+├── Move.toml
+└── sources/
+    ├── main.move
+    ├── utils.move
+    └── types.move
+```
+
+### Move.toml
+
+```toml
+[package]
+name = "MyPackage"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "framework/mainnet" }
+
+[addresses]
+my_package = "0x0"
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Organize by functionality">
+    ```
+    game_package/
+    ├── sources/
+    │   ├── game.move        # Core game logic
+    │   ├── player.move      # Player management
+    │   ├── items.move       # Item system
+    │   └── marketplace.move # Trading
+    ```
+  </Accordion>
+  
+  <Accordion title="Use minimal visibility">
+    ```move
+    // Make functions as private as possible
+    fun internal_helper() { /* ... */ }  // Private
+    public(package) fun package_api() { /* ... */ }  // Package
+    public fun public_api() { /* ... */ }  // Public only when needed
+    ```
+  </Accordion>
+  
+  <Accordion title="Document modules">
+    ```move
+    /// Core game mechanics module
+    /// 
+    /// Handles player actions, game state, and rewards
+    module my_package::game {
+        // ...
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="Move Overview" href="/concepts/move-overview" icon="book">
+    Learn Move basics
+  </Card>
+  <Card title="Move Functions" href="/concepts/move-functions" icon="function">
+    Understand functions
+  </Card>
+  <Card title="Move Abilities" href="/concepts/move-abilities" icon="wand-magic-sparkles">
+    Type abilities explained
+  </Card>
+</CardGroup>

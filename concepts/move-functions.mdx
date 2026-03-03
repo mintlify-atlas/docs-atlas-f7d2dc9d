@@ -1,0 +1,200 @@
+---
+title: Move Functions
+description: Master Move function syntax, visibility, parameters, and advanced patterns.
+---
+
+Functions are the executable components of Move modules. Understanding function types and patterns is crucial for effective Move development.
+
+## Function Basics
+
+```move
+// Basic function
+fun add(a: u64, b: u64): u64 {
+    a + b
+}
+
+// Public function
+public fun subtract(a: u64, b: u64): u64 {
+    a - b
+}
+
+// Entry function (callable from transactions)
+entry fun create_object(value: u64, ctx: &mut TxContext) {
+    let obj = MyObject {
+        id: object::new(ctx),
+        value,
+    };
+    transfer::transfer(obj, ctx.sender());
+}
+```
+
+## Visibility Modifiers
+
+<CardGroup cols={2}>
+  <Card title="Private" icon="lock">
+    Default visibility, only within module
+  </Card>
+  <Card title="Public" icon="unlock">
+    Callable from any module
+  </Card>
+  <Card title="Public(package)" icon="box">
+    Only within the same package
+  </Card>
+  <Card title="Entry" icon="door-open">
+    Callable from transactions
+  </Card>
+</CardGroup>
+
+## Entry Functions
+
+Entry functions can be called directly from transactions:
+
+```move filename="examples/move/entry_functions/sources/example.move"
+/// Entry functions can accept a reference to the `TxContext`
+/// (mutable or immutable) as their last parameter.
+entry fun share(bar: u64, ctx: &mut TxContext) {
+    transfer::share_object(Foo {
+        id: object::new(ctx),
+        bar,
+    })
+}
+
+/// Entry functions can return types that have `drop`.
+entry fun bar(foo: &Foo): u64 {
+    foo.bar
+}
+```
+
+<Warning>
+  Entry functions cannot return types without `drop` ability. They also have restrictions when used in Programmable Transaction Blocks.
+</Warning>
+
+## Parameters
+
+### By Value, Reference, and Mutable Reference
+
+```move
+// By value - takes ownership
+public fun consume(obj: MyObject) {
+    let MyObject { id, value: _ } = obj;
+    id.delete();
+}
+
+// Immutable reference - read only
+public fun read(obj: &MyObject): u64 {
+    obj.value
+}
+
+// Mutable reference - can modify
+public fun update(obj: &mut MyObject, new_value: u64) {
+    obj.value = new_value;
+}
+```
+
+### Transaction Context
+
+```move
+public fun with_context(ctx: &TxContext) {
+    let sender = ctx.sender();
+    let epoch = ctx.epoch();
+}
+
+public fun create(ctx: &mut TxContext) {
+    let id = object::new(ctx);  // Needs mutable ctx
+}
+```
+
+## Return Values
+
+```move
+// Single return
+public fun get_value(obj: &MyObject): u64 {
+    obj.value
+}
+
+// Multiple returns
+public fun split_value(x: u64): (u64, u64) {
+    (x / 2, x / 2)
+}
+
+// No return (unit type)
+public fun do_something() {
+    // ...
+}
+```
+
+## Generics
+
+```move
+public fun wrap<T: store>(value: T): Box<T> {
+    Box { value }
+}
+
+public fun unwrap<T: store>(box: Box<T>): T {
+    let Box { value } = box;
+    value
+}
+
+// Multiple type parameters
+public fun pair<T: store, U: store>(t: T, u: U): Pair<T, U> {
+    Pair { first: t, second: u }
+}
+```
+
+## Inline Functions
+
+```move
+// Inline function with lambda
+v.do!(|x| {
+    // process x
+});
+
+// Filter with inline function
+let filtered = v.filter!(|x| *x > 10);
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use references when possible">
+    ```move
+    // Bad: Takes ownership unnecessarily
+    public fun bad_read(obj: MyObject): u64 {
+        let value = obj.value;
+        let MyObject { id, value: _ } = obj;
+        id.delete();
+        value
+    }
+    
+    // Good: Uses reference
+    public fun good_read(obj: &MyObject): u64 {
+        obj.value
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Validate inputs">
+    ```move
+    const EInvalidValue: u64 = 0;
+    
+    public fun set_value(obj: &mut MyObject, value: u64) {
+        assert!(value > 0, EInvalidValue);
+        obj.value = value;
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="Move Overview" href="/concepts/move-overview" icon="book">
+    Learn Move basics
+  </Card>
+  <Card title="Move Modules" href="/concepts/move-modules" icon="cubes">
+    Module organization
+  </Card>
+  <Card title="Move Abilities" href="/concepts/move-abilities" icon="wand-magic-sparkles">
+    Type abilities
+  </Card>
+</CardGroup>

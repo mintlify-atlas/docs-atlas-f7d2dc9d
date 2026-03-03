@@ -1,0 +1,456 @@
+---
+title: Shared Objects
+description: Work with shared objects for multi-user interactions on Sui
+---
+
+Shared objects enable multiple users to interact with the same on-chain state. They're essential for protocols like DEXs, lending platforms, and games.
+
+## Shared vs Owned Objects
+
+**Owned objects**:
+- Owned by a single address
+- Fast - no consensus required
+- Suitable for wallets, NFTs, personal items
+
+**Shared objects**:
+- Accessible by anyone
+- Require consensus
+- Necessary for multi-user applications
+
+## Creating Shared Objects
+
+Use `transfer::share_object` to make an object shared:
+
+```move
+module my_package::counter {
+    public struct Counter has key {
+        id: UID,
+        value: u64,
+    }
+
+    fun init(ctx: &mut TxContext) {
+        let counter = Counter {
+            id: object::new(ctx),
+            value: 0,
+        };
+        // Make it shared so anyone can increment
+        transfer::share_object(counter);
+    }
+
+    public fun increment(counter: &mut Counter) {
+        counter.value = counter.value + 1;
+    }
+}
+```
+
+## Real Example: Cash Register
+
+From `examples/move/transfer-to-object/shared-no-tto`:
+
+```move
+module shared_no_tto::shared_cash_register {
+    use sui::coin::Coin;
+    use sui::sui::SUI;
+    use sui::dynamic_field;
+    use sui::vec_set::{Self, VecSet};
+    use std::string::String;
+
+    const EInvalidOwner: u64 = 0;
+    const EInvalidPaymentID: u64 = 1;
+    const ENotAuthorized: u64 = 2;
+
+    /// Shared cash register for a business
+    public struct CashRegister has key {
+        id: UID,
+        authorized_individuals: VecSet<address>,
+        business_name: String,
+        register_owner: address,
+    }
+
+    /// Create a shared cash register
+    public fun create_cash_register(
+        mut authorized_individuals_vec: vector<address>,
+        business_name: String,
+        ctx: &mut TxContext,
+    ) {
+        let mut authorized_individuals = vec_set::empty();
+
+        while (!vector::is_empty(&authorized_individuals_vec)) {
+            let addr = vector::pop_back(&mut authorized_individuals_vec);
+            vec_set::insert(&mut authorized_individuals, addr);
+        };
+
+        let register = CashRegister {
+            id: object::new(ctx),
+            authorized_individuals,
+            business_name,
+            register_owner: tx_context::sender(ctx),
+        };
+        transfer::share_object(register);
+    }
+
+    /// Transfer ownership
+    public fun transfer_cash_register_ownership(
+        register: &mut CashRegister,
+        new_owner: address,
+        ctx: &TxContext,
+    ) {
+        assert!(register.register_owner == tx_context::sender(ctx), EInvalidOwner);
+        register.register_owner = new_owner;
+    }
+
+    /// Process payment (authorized only)
+    public fun process_payment(
+        register: &mut CashRegister,
+        payment_id: u64,
+        ctx: &TxContext,
+    ): Coin<SUI> {
+        let sender = tx_context::sender(ctx);
+        assert!(
+            vec_set::contains(&register.authorized_individuals, &sender) 
+                || sender == register.register_owner,
+            ENotAuthorized,
+        );
+        assert!(dynamic_field::exists_(&register.id, payment_id), EInvalidPaymentID);
+
+        let payment = dynamic_field::remove(&mut register.id, payment_id);
+        payment
+    }
+
+    /// Make a payment (anyone can pay)
+    public fun pay(
+        register: &mut CashRegister,
+        payment_id: u64,
+        coin: Coin<SUI>,
+        ctx: &mut TxContext
+    ) {
+        dynamic_field::add(&mut register.id, payment_id, coin);
+    }
+}
+```
+
+## Access Control Patterns
+
+### Owner-only functions
+
+```move
+public struct SharedVault has key {
+    id: UID,
+    owner: address,
+    balance: u64,
+}
+
+public fun withdraw(
+    vault: &mut SharedVault,
+    amount: u64,
+    ctx: &TxContext
+) {
+    assert!(vault.owner == ctx.sender(), ENotOwner);
+    vault.balance = vault.balance - amount;
+}
+```
+
+### Role-based access
+
+```move
+use sui::vec_set::{Self, VecSet};
+
+public struct DAO has key {
+    id: UID,
+    admins: VecSet<address>,
+    members: VecSet<address>,
+}
+
+public fun admin_action(
+    dao: &mut DAO,
+    ctx: &TxContext
+) {
+    assert!(vec_set::contains(&dao.admins, &ctx.sender()), ENotAdmin);
+    // Admin logic...
+}
+
+public fun member_action(
+    dao: &mut DAO,
+    ctx: &TxContext  
+) {
+    assert!(vec_set::contains(&dao.members, &ctx.sender()), ENotMember);
+    // Member logic...
+}
+```
+
+### Capability-based access
+
+```move
+public struct Pool has key {
+    id: UID,
+    balance: u64,
+}
+
+public struct AdminCap has key, store {
+    id: UID,
+    pool_id: ID,
+}
+
+public fun withdraw(
+    pool: &mut Pool,
+    cap: &AdminCap,
+    amount: u64,
+) {
+    assert!(object::id(pool) == cap.pool_id, EInvalidCap);
+    pool.balance = pool.balance - amount;
+}
+```
+
+## Flash Loan Example
+
+From `examples/move/flash_lender`:
+
+```move
+module flash_lender::example {
+    use sui::balance::{Self, Balance};
+    use sui::coin::{Self, Coin};
+
+    /// Shared flash lender
+    public struct FlashLender<phantom T> has key {
+        id: UID,
+        to_lend: Balance<T>,
+        fee: u64,
+    }
+
+    /// Hot potato receipt - must be repaid
+    public struct Receipt<phantom T> {
+        flash_lender_id: ID,
+        repay_amount: u64,
+    }
+
+    /// Admin capability
+    public struct AdminCap has key, store {
+        id: UID,
+        flash_lender_id: ID,
+    }
+
+    const ELoanTooLarge: u64 = 0;
+    const EInvalidRepaymentAmount: u64 = 1;
+    const ERepayToWrongLender: u64 = 2;
+
+    /// Create a flash lender
+    public fun new<T>(
+        to_lend: Balance<T>,
+        fee: u64,
+        ctx: &mut TxContext
+    ): AdminCap {
+        let id = object::new(ctx);
+        let flash_lender_id = id.uid_to_inner();
+        let flash_lender = FlashLender { id, to_lend, fee };
+
+        transfer::share_object(flash_lender);
+
+        AdminCap { id: object::new(ctx), flash_lender_id }
+    }
+
+    /// Borrow funds
+    public fun loan<T>(
+        self: &mut FlashLender<T>,
+        amount: u64,
+        ctx: &mut TxContext,
+    ): (Coin<T>, Receipt<T>) {
+        assert!(self.to_lend.value() >= amount, ELoanTooLarge);
+
+        let loan = coin::take(&mut self.to_lend, amount, ctx);
+        let repay_amount = amount + self.fee;
+        let receipt = Receipt {
+            flash_lender_id: object::id(self),
+            repay_amount,
+        };
+
+        (loan, receipt)
+    }
+
+    /// Repay loan
+    public fun repay<T>(
+        self: &mut FlashLender<T>,
+        payment: Coin<T>,
+        receipt: Receipt<T>
+    ) {
+        let Receipt { flash_lender_id, repay_amount } = receipt;
+
+        assert!(object::id(self) == flash_lender_id, ERepayToWrongLender);
+        assert!(payment.value() == repay_amount, EInvalidRepaymentAmount);
+
+        coin::put(&mut self.to_lend, payment)
+    }
+}
+```
+
+## Testing Shared Objects
+
+```move
+#[test]
+fun test_shared_counter() {
+    use sui::test_scenario as ts;
+
+    let admin = @0xAD;
+    let alice = @0xA;
+    let bob = @0xB;
+
+    let mut scenario = ts::begin(admin);
+
+    // Create shared counter
+    {
+        let counter = Counter {
+            id: object::new(scenario.ctx()),
+            value: 0,
+        };
+        transfer::share_object(counter);
+    };
+
+    // Alice increments
+    scenario.next_tx(alice);
+    {
+        let mut counter = scenario.take_shared<Counter>();
+        increment(&mut counter);
+        assert!(counter.value == 1, 0);
+        ts::return_shared(counter);
+    };
+
+    // Bob increments
+    scenario.next_tx(bob);
+    {
+        let mut counter = scenario.take_shared<Counter>();
+        increment(&mut counter);
+        assert!(counter.value == 2, 1);
+        ts::return_shared(counter);
+    };
+
+    scenario.end();
+}
+```
+
+## Performance Considerations
+
+### Minimize shared object usage
+
+Use owned objects when possible:
+
+```move
+// Good: Personal wallet (owned)
+public struct Wallet has key {
+    id: UID,
+    owner: address,
+    balance: u64,
+}
+
+// Good: Global liquidity pool (shared)
+public struct Pool has key {
+    id: UID,
+    reserves: Balance<SUI>,
+}
+```
+
+### Avoid contention
+
+Design to minimize concurrent access:
+
+```move
+// Avoid: Single global counter (high contention)
+public struct GlobalCounter has key {
+    id: UID,
+    value: u64,
+}
+
+// Better: Per-user counters (low contention)
+public struct UserCounter has key {
+    id: UID,
+    owner: address,
+    value: u64,
+}
+```
+
+## Common Patterns
+
+### Registry pattern
+
+```move
+public struct Registry has key {
+    id: UID,
+    items: Table<address, Item>,
+}
+
+public fun register(
+    registry: &mut Registry,
+    item: Item,
+    ctx: &TxContext
+) {
+    table::add(&mut registry.items, ctx.sender(), item);
+}
+```
+
+### Pool pattern
+
+```move
+public struct LiquidityPool has key {
+    id: UID,
+    token_a: Balance<TokenA>,
+    token_b: Balance<TokenB>,
+}
+
+public fun swap_a_to_b(
+    pool: &mut LiquidityPool,
+    input: Coin<TokenA>,
+    ctx: &mut TxContext
+): Coin<TokenB> {
+    // Swap logic...
+}
+```
+
+## Best Practices
+
+### 1. Use shared objects sparingly
+
+Only when multiple users need concurrent access.
+
+### 2. Implement proper access control
+
+Always validate callers:
+
+```move
+public fun admin_function(
+    obj: &mut SharedObject,
+    ctx: &TxContext
+) {
+    assert!(obj.admin == ctx.sender(), ENotAuthorized);
+    // ...
+}
+```
+
+### 3. Document shared object semantics
+
+```move
+/// Shared pool accessible by all users.
+/// - Anyone can deposit
+/// - Only owner can withdraw
+public struct Pool has key { /* ... */ }
+```
+
+### 4. Consider object composition
+
+Combine shared and owned objects:
+
+```move
+// Shared pool
+public struct Pool has key { /* ... */ }
+
+// Owned receipt
+public struct DepositReceipt has key, store {
+    id: UID,
+    pool_id: ID,
+    amount: u64,
+}
+```
+
+## Next Steps
+
+- [Learn about events](/guides/events)
+- [Implement capability patterns](/guides/capability-pattern)
+- [Build programmable transactions](/guides/programmable-transactions)
+- [Explore DeFi example](/guides/examples/defi)

@@ -1,0 +1,671 @@
+---
+title: GraphQL Queries
+description: Comprehensive guide to querying Sui data with GraphQL
+---
+
+This page provides detailed examples of GraphQL queries for common use cases.
+
+## Object Queries
+
+### Get Object Details
+
+Query an object with all available fields:
+
+```graphql
+query GetObjectDetails($id: SuiAddress!) {
+  object(address: $id) {
+    address
+    version
+    digest
+    storageRebate
+    
+    owner {
+      __typename
+      ... on AddressOwner {
+        owner {
+          address
+        }
+      }
+      ... on Shared {
+        initialSharedVersion
+      }
+      ... on Parent {
+        parent {
+          address
+        }
+      }
+      ... on Immutable {
+        __typename
+      }
+    }
+    
+    previousTransactionBlock {
+      digest
+    }
+    
+    asMoveObject {
+      hasPublicTransfer
+      contents {
+        type {
+          repr
+          layout
+          signature
+        }
+        json
+        bcs
+      }
+    }
+    
+    display {
+      key
+      value
+      error
+    }
+  }
+}
+```
+
+### Get Object History
+
+```graphql
+query GetObjectHistory($id: SuiAddress!, $first: Int) {
+  object(address: $id) {
+    address
+    version
+    
+    previousTransactionBlock {
+      digest
+      sender {
+        address
+      }
+      effects {
+        timestamp
+      }
+    }
+    
+    # Get historical versions
+    asMoveObject {
+      contents {
+        type {
+          repr
+        }
+      }
+    }
+  }
+}
+```
+
+### Get Dynamic Fields
+
+```graphql
+query GetDynamicFields($parentId: SuiAddress!, $first: Int, $after: String) {
+  object(address: $parentId) {
+    dynamicFields(first: $first, after: $after) {
+      nodes {
+        name {
+          type {
+            repr
+          }
+          json
+          bcs
+        }
+        value {
+          ... on MoveObject {
+            contents {
+              type {
+                repr
+              }
+              json
+            }
+          }
+          ... on MoveValue {
+            type {
+              repr
+            }
+            json
+            bcs
+          }
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}
+```
+
+## Address Queries
+
+### Get Address Information
+
+```graphql
+query GetAddress($address: SuiAddress!) {
+  address(address: $address) {
+    address
+    
+    balance(type: "0x2::sui::SUI") {
+      coinType {
+        repr
+      }
+      coinObjectCount
+      totalBalance
+    }
+    
+    objects(first: 10) {
+      nodes {
+        address
+        version
+        asMoveObject {
+          contents {
+            type {
+              repr
+            }
+          }
+        }
+      }
+    }
+    
+    transactionBlocks(first: 10) {
+      nodes {
+        digest
+        effects {
+          timestamp
+          status
+        }
+      }
+    }
+  }
+}
+```
+
+### Get All Balances
+
+```graphql
+query GetAllBalances($address: SuiAddress!) {
+  address(address: $address) {
+    balances {
+      nodes {
+        coinType {
+          repr
+        }
+        coinObjectCount
+        totalBalance
+      }
+    }
+  }
+}
+```
+
+### Get Coins by Type
+
+```graphql
+query GetCoins(
+  $address: SuiAddress!
+  $type: String
+  $first: Int
+  $after: String
+) {
+  address(address: $address) {
+    coins(type: $type, first: $first, after: $after) {
+      nodes {
+        address
+        version
+        coinBalance
+        asCoin {
+          coinBalance
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}
+```
+
+## Transaction Queries
+
+### Get Transaction Block
+
+```graphql
+query GetTransactionBlock($digest: String!) {
+  transactionBlock(digest: $digest) {
+    digest
+    
+    sender {
+      address
+    }
+    
+    gasInput {
+      gasSponsor {
+        address
+      }
+      gasPrice
+      gasBudget
+      gasPayment {
+        nodes {
+          address
+        }
+      }
+    }
+    
+    kind {
+      __typename
+      ... on ProgrammableTransactionBlock {
+        inputs {
+          nodes {
+            __typename
+          }
+        }
+        transactions {
+          nodes {
+            __typename
+          }
+        }
+      }
+    }
+    
+    effects {
+      status
+      errors
+      timestamp
+      checkpoint {
+        sequenceNumber
+      }
+      
+      gasEffects {
+        gasObject {
+          address
+        }
+        gasSummary {
+          computationCost
+          storageCost
+          storageRebate
+          nonRefundableStorageFee
+        }
+      }
+      
+      objectChanges {
+        nodes {
+          address
+          idCreated
+          idDeleted
+          outputState {
+            address
+            version
+          }
+        }
+      }
+      
+      balanceChanges {
+        nodes {
+          owner {
+            address
+          }
+          amount
+          coinType {
+            repr
+          }
+        }
+      }
+    }
+    
+    events {
+      nodes {
+        sendingModule {
+          package {
+            address
+          }
+          name
+        }
+        type {
+          repr
+        }
+        sender {
+          address
+        }
+        json
+        bcs
+      }
+    }
+  }
+}
+```
+
+### Query Transaction Blocks
+
+```graphql
+query QueryTransactionBlocks(
+  $filter: TransactionBlockFilter
+  $first: Int
+  $after: String
+) {
+  transactionBlocks(filter: $filter, first: $first, after: $after) {
+    nodes {
+      digest
+      sender {
+        address
+      }
+      effects {
+        status
+        timestamp
+        gasEffects {
+          gasSummary {
+            computationCost
+            storageCost
+          }
+        }
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+```
+
+Filter by sender:
+```json
+{
+  "filter": {
+    "signAddress": "0x..."
+  },
+  "first": 50
+}
+```
+
+Filter by recipient:
+```json
+{
+  "filter": {
+    "recvAddress": "0x..."
+  },
+  "first": 50
+}
+```
+
+## Event Queries
+
+### Query Events
+
+```graphql
+query QueryEvents($filter: EventFilter, $first: Int, $after: String) {
+  events(filter: $filter, first: $first, after: $after) {
+    nodes {
+      sendingModule {
+        package {
+          address
+        }
+        name
+      }
+      type {
+        repr
+      }
+      sender {
+        address
+      }
+      timestamp
+      json
+      bcs
+      
+      transactionBlock {
+        digest
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+```
+
+Filter by event type:
+```json
+{
+  "filter": {
+    "eventType": "0x2::coin::CoinCreated<0x2::sui::SUI>"
+  },
+  "first": 20
+}
+```
+
+Filter by sender:
+```json
+{
+  "filter": {
+    "sender": "0x..."
+  },
+  "first": 20
+}
+```
+
+Filter by package:
+```json
+{
+  "filter": {
+    "emittingPackage": "0x2"
+  },
+  "first": 20
+}
+```
+
+## Checkpoint Queries
+
+### Get Checkpoint
+
+```graphql
+query GetCheckpoint($id: UInt53!) {
+  checkpoint(id: { sequenceNumber: $id }) {
+    sequenceNumber
+    timestamp
+    networkTotalTransactions
+    previousCheckpointDigest
+    
+    epoch {
+      epochId
+      referenceGasPrice
+    }
+    
+    transactionBlocks(first: 10) {
+      nodes {
+        digest
+        effects {
+          status
+        }
+      }
+    }
+  }
+}
+```
+
+### Query Checkpoints
+
+```graphql
+query QueryCheckpoints($first: Int, $after: String) {
+  checkpoints(first: $first, after: $after) {
+    nodes {
+      sequenceNumber
+      timestamp
+      networkTotalTransactions
+      epoch {
+        epochId
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+```
+
+## Epoch Queries
+
+### Get Current Epoch
+
+```graphql
+query GetCurrentEpoch {
+  epoch {
+    epochId
+    referenceGasPrice
+    startTimestamp
+    endTimestamp
+    
+    validatorSet {
+      totalStake
+      pendingActiveValidatorsSize
+      
+      activeValidators(first: 100) {
+        nodes {
+          name
+          description
+          imageUrl
+          
+          address {
+            address
+          }
+          
+          votingPower
+          stakingPoolActivationEpoch
+          stakingPoolSuiBalance
+          rewardsPool
+          poolTokenBalance
+          pendingStake
+          pendingTotalSuiWithdraw
+          
+          apy
+        }
+      }
+    }
+  }
+}
+```
+
+### Get Epoch by ID
+
+```graphql
+query GetEpoch($id: UInt53!) {
+  epoch(id: $id) {
+    epochId
+    referenceGasPrice
+    startTimestamp
+    endTimestamp
+    totalCheckpoints
+    totalTransactions
+    totalGasFees
+    totalStakeRewards
+    
+    validatorSet {
+      totalStake
+    }
+  }
+}
+```
+
+## Package Queries
+
+### Get Package
+
+```graphql
+query GetPackage($id: SuiAddress!) {
+  object(address: $id) {
+    address
+    version
+    
+    asMovePackage {
+      modules {
+        nodes {
+          name
+          
+          fileFormatVersion
+          
+          functions {
+            nodes {
+              name
+              visibility
+              isEntry
+              
+              parameters {
+                repr
+              }
+              return {
+                repr
+              }
+            }
+          }
+          
+          structs {
+            nodes {
+              name
+              abilities
+              
+              typeParameters {
+                constraints
+              }
+              
+              fields {
+                name
+                type {
+                  repr
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+## Combining Queries
+
+### Get Complete Address Profile
+
+```graphql
+query GetAddressProfile($address: SuiAddress!) {
+  address(address: $address) {
+    address
+    
+    # Balances
+    balances(first: 100) {
+      nodes {
+        coinType {
+          repr
+        }
+        totalBalance
+      }
+    }
+    
+    # Recent transactions
+    transactionBlocks(first: 10) {
+      nodes {
+        digest
+        effects {
+          timestamp
+          status
+        }
+      }
+    }
+    
+    # Owned objects
+    objects(first: 20) {
+      nodes {
+        address
+        asMoveObject {
+          contents {
+            type {
+              repr
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```

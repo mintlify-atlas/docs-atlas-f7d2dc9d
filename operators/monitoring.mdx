@@ -1,0 +1,517 @@
+---
+title: Monitoring Nodes
+description: Complete guide to monitoring Sui nodes with metrics, logging, and observability tools.
+---
+
+Proper monitoring is essential for running reliable Sui nodes. This guide covers metrics, logging, and alerting.
+
+## Metrics Collection
+
+Sui nodes expose Prometheus metrics on the metrics endpoint.
+
+### Metrics Endpoint
+
+By default, metrics are available at:
+
+```
+http://localhost:9184/metrics
+```
+
+Configuration:
+
+```yaml
+metrics-address: 0.0.0.0:9184
+```
+
+### Viewing Metrics
+
+View all metrics:
+
+```bash
+curl -s http://localhost:9184/metrics
+```
+
+Search for specific metrics:
+
+```bash
+curl -s http://localhost:9184/metrics | grep checkpoint
+```
+
+## Key Metrics
+
+### Synchronization Metrics
+
+**Checkpoint Progress**
+
+```bash
+# Highest synced checkpoint
+curl -s http://localhost:9184/metrics | grep highest_synced_checkpoint
+
+# Highest verified checkpoint
+curl -s http://localhost:9184/metrics | grep highest_verified_checkpoint
+
+# Last executed checkpoint
+curl -s http://localhost:9184/metrics | grep last_executed_checkpoint
+```
+
+**Sync Lag**
+
+```promql
+# How far behind the network is this node
+sum(highest_verified_checkpoint) - sum(last_executed_checkpoint)
+```
+
+### Consensus Metrics (Validators)
+
+**Round and Commit Metrics**
+
+```bash
+# Current consensus round
+curl -s http://localhost:9184/metrics | grep current_round
+
+# Committed subdags
+curl -s http://localhost:9184/metrics | grep committed_subdags
+
+# Leader timeout rate
+curl -s http://localhost:9184/metrics | grep leader_timeout
+```
+
+**Transaction Processing**
+
+```bash
+# Transactions per second
+curl -s http://localhost:9184/metrics | grep total_transaction_effects
+
+# Certificate processing rate
+curl -s http://localhost:9184/metrics | grep total_certificates
+```
+
+### Performance Metrics
+
+**Database Metrics**
+
+```bash
+# RocksDB metrics
+curl -s http://localhost:9184/metrics | grep rocksdb
+
+# Cache hit rates
+curl -s http://localhost:9184/metrics | grep cache_hit
+```
+
+**Execution Metrics**
+
+```bash
+# Transaction execution latency
+curl -s http://localhost:9184/metrics | grep execution_latency
+
+# Checkpoint execution time
+curl -s http://localhost:9184/metrics | grep checkpoint_exec
+```
+
+### Network Metrics
+
+**P2P Metrics**
+
+```bash
+# Connected peers
+curl -s http://localhost:9184/metrics | grep connected_peers
+
+# Inbound/outbound connections
+curl -s http://localhost:9184/metrics | grep network_peer
+
+# State sync metrics
+curl -s http://localhost:9184/metrics | grep state_sync
+```
+
+**RPC Metrics**
+
+```bash
+# RPC request rate
+curl -s http://localhost:9184/metrics | grep rpc_requests_total
+
+# RPC latency
+curl -s http://localhost:9184/metrics | grep rpc_request_latency
+```
+
+## Logging
+
+### Log Configuration
+
+Logs are controlled via environment variables:
+
+```bash
+# Log levels
+export RUST_LOG="info,sui_core=debug,consensus=debug,jsonrpsee=error"
+
+# Enable JSON logging
+export RUST_LOG_JSON=1
+
+# Enable backtraces
+export RUST_BACKTRACE=1
+```
+
+### Log Levels
+
+Available log levels (from most to least verbose):
+- `trace`: Very detailed debugging information
+- `debug`: Detailed debugging information
+- `info`: General informational messages
+- `warn`: Warning messages
+- `error`: Error messages
+
+Module-specific logging:
+
+```bash
+# Different levels for different modules
+RUST_LOG="warn,sui_core=info,consensus=debug,narwhal=trace"
+```
+
+### Viewing Logs
+
+**Systemd Deployment**
+
+```bash
+# Follow logs
+journalctl -u sui-node -f
+
+# View last 100 lines
+journalctl -u sui-node -n 100
+
+# View logs since timestamp
+journalctl -u sui-node --since "2024-01-01 00:00:00"
+
+# Search logs
+journalctl -u sui-node -g "error|panic"
+
+# Follow with specific pattern
+journalctl -u sui-node -f | grep checkpoint
+```
+
+**Docker Deployment**
+
+```bash
+# Follow logs
+docker compose logs -f validator
+
+# Last 100 lines
+docker logs --tail 100 validator
+
+# Logs since 10 minutes ago
+docker logs --since 10m validator
+
+# Follow with timestamps
+docker compose logs -f --timestamps validator
+```
+
+### Dynamic Log Configuration
+
+Change log levels at runtime using the admin interface:
+
+```bash
+# View current log configuration
+curl localhost:1337/logging
+
+# Change to info level
+curl localhost:1337/logging -d "info"
+
+# Enable debug for specific module
+curl localhost:1337/logging -d "info,sui_core=debug,consensus=trace"
+```
+
+## Prometheus Setup
+
+### Install Prometheus
+
+```bash
+# Download Prometheus
+wget https://github.com/prometheus/prometheus/releases/download/v2.47.0/prometheus-2.47.0.linux-amd64.tar.gz
+tar xvfz prometheus-*.tar.gz
+cd prometheus-*
+```
+
+### Configure Prometheus
+
+Create `prometheus.yml`:
+
+```yaml
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'sui-validator'
+    static_configs:
+      - targets: ['localhost:9184']
+        labels:
+          node_type: 'validator'
+          network: 'mainnet'
+```
+
+For multiple nodes:
+
+```yaml
+scrape_configs:
+  - job_name: 'sui-nodes'
+    static_configs:
+      - targets: 
+        - 'validator1.example.com:9184'
+        - 'validator2.example.com:9184'
+        labels:
+          node_type: 'validator'
+      - targets:
+        - 'fullnode1.example.com:9184'
+        - 'fullnode2.example.com:9184'
+        labels:
+          node_type: 'fullnode'
+```
+
+### Start Prometheus
+
+```bash
+./prometheus --config.file=prometheus.yml
+```
+
+Access Prometheus UI at `http://localhost:9090`.
+
+## Grafana Setup
+
+### Install Grafana
+
+```bash
+# Add Grafana repository
+sudo apt-get install -y software-properties-common
+sudo add-apt-repository "deb https://packages.grafana.com/oss/deb stable main"
+wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
+
+# Install Grafana
+sudo apt-get update
+sudo apt-get install grafana
+
+# Start Grafana
+sudo systemctl start grafana-server
+sudo systemctl enable grafana-server
+```
+
+Access Grafana at `http://localhost:3000` (default login: admin/admin).
+
+### Add Prometheus Data Source
+
+1. Navigate to Configuration > Data Sources
+2. Click "Add data source"
+3. Select "Prometheus"
+4. Set URL to `http://localhost:9090`
+5. Click "Save & Test"
+
+### Import Dashboards
+
+Sui provides reference dashboards in the repository:
+
+```bash
+# Download dashboard
+wget https://raw.githubusercontent.com/MystenLabs/sui/main/docker/grafana-local/dashboards/validator-dashboard.json
+```
+
+Import in Grafana:
+1. Click "+" > "Import"
+2. Upload JSON file or paste content
+3. Select Prometheus data source
+4. Click "Import"
+
+## Using Docker Compose for Monitoring Stack
+
+Create `docker-compose.monitoring.yaml`:
+
+```yaml
+version: '3.8'
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+
+volumes:
+  prometheus-data:
+  grafana-data:
+```
+
+Start the monitoring stack:
+
+```bash
+docker compose -f docker-compose.monitoring.yaml up -d
+```
+
+## Public Dashboards
+
+View network-wide validator metrics:
+
+- [Sui Mainnet Validators](https://metrics.sui.io/public-dashboards/)
+- [Sui Testnet Validators](https://metrics.sui.io/public-dashboards/9b841d63c9bf43fe8acec4f0fa991f5e)
+
+View validator stake and status:
+
+- [Suiscan Validators](https://suiscan.xyz/mainnet/validators)
+- [SuiVision Validators](https://suivision.xyz/validators)
+
+## Alerting
+
+### Prometheus Alert Rules
+
+Create `alerts.yml`:
+
+```yaml
+groups:
+  - name: sui_node_alerts
+    interval: 30s
+    rules:
+      # Node is down
+      - alert: NodeDown
+        expr: up{job="sui-nodes"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Sui node {{ $labels.instance }} is down"
+          description: "Node has been down for more than 2 minutes"
+
+      # Sync lag too high
+      - alert: HighSyncLag
+        expr: (highest_verified_checkpoint - last_executed_checkpoint) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High sync lag on {{ $labels.instance }}"
+          description: "Node is {{ $value }} checkpoints behind"
+
+      # Low peer count
+      - alert: LowPeerCount
+        expr: connected_peers < 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low peer count on {{ $labels.instance }}"
+          description: "Only {{ $value }} peers connected"
+
+      # High error rate
+      - alert: HighErrorRate
+        expr: rate(sui_errors_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate on {{ $labels.instance }}"
+```
+
+### Alertmanager Configuration
+
+Create `alertmanager.yml`:
+
+```yaml
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'instance']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  receiver: 'default'
+
+receivers:
+  - name: 'default'
+    email_configs:
+      - to: 'alerts@example.com'
+        from: 'prometheus@example.com'
+        smarthost: 'smtp.gmail.com:587'
+        auth_username: 'alerts@example.com'
+        auth_password: 'password'
+```
+
+## Essential Queries
+
+### Checkpoint Sync Status
+
+```promql
+# Time behind latest checkpoint
+(timestamp(highest_verified_checkpoint) - timestamp(last_executed_checkpoint)) / 60
+
+# Checkpoint processing rate
+rate(last_executed_checkpoint[5m])
+```
+
+### Transaction Metrics
+
+```promql
+# Transactions per second
+rate(total_transaction_effects[1m])
+
+# Transaction execution latency (p95)
+histogram_quantile(0.95, rate(execution_latency_bucket[5m]))
+```
+
+### Resource Usage
+
+```promql
+# Database size
+sum(rocksdb_total_sst_files_size)
+
+# Memory usage (if node_exporter is installed)
+node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes
+```
+
+## Health Checks
+
+Create automated health check scripts:
+
+```bash
+#!/bin/bash
+# health-check.sh
+
+METRICS_URL="http://localhost:9184/metrics"
+
+# Check if node is responding
+if ! curl -sf "$METRICS_URL" > /dev/null; then
+    echo "ERROR: Metrics endpoint not responding"
+    exit 1
+fi
+
+# Check sync lag
+LAG=$(curl -s "$METRICS_URL" | grep highest_verified_checkpoint | awk '{print $2}' | \
+      awk '{max=(NR==1)?$1:(max>$1?max:$1); min=(NR==1)?$1:(min<$1?min:$1)} END {print max-min}')
+
+if [ "$LAG" -gt 100 ]; then
+    echo "WARNING: Sync lag is $LAG checkpoints"
+    exit 1
+fi
+
+echo "OK: Node is healthy"
+exit 0
+```
+
+Schedule with cron:
+
+```bash
+# Run health check every 5 minutes
+*/5 * * * * /opt/sui/scripts/health-check.sh
+```

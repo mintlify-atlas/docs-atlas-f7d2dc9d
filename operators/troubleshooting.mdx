@@ -1,0 +1,669 @@
+---
+title: Troubleshooting Guide
+description: Common issues and solutions for Sui node operators with debugging procedures.
+---
+
+This guide covers common issues encountered when running Sui nodes and their solutions.
+
+## Node Won't Start
+
+### Configuration File Errors
+
+**Symptoms**: Node fails to start with configuration parse errors
+
+```bash
+# Check logs
+journalctl -u sui-node -n 50
+
+# Common error:
+# "Failed to load config: invalid type: string, expected a sequence"
+```
+
+**Solutions**:
+
+<Steps>
+  <Step title="Validate YAML syntax">
+    ```bash
+    # Install yamllint if needed
+    sudo apt install yamllint
+    
+    # Check syntax
+    yamllint /opt/sui/config/validator.yaml
+    ```
+  </Step>
+
+  <Step title="Check indentation">
+    YAML is whitespace-sensitive. Ensure proper indentation:
+    
+    ```yaml
+    # Correct
+    p2p-config:
+      listen-address: 0.0.0.0:8084
+    
+    # Incorrect (wrong indentation)
+    p2p-config:
+     listen-address: 0.0.0.0:8084
+    ```
+  </Step>
+
+  <Step title="Verify paths">
+    ```bash
+    # Check that all file paths exist
+    ls -l /opt/sui/key-pairs/*.key
+    ls -l /opt/sui/config/genesis.blob
+    ```
+  </Step>
+</Steps>
+
+### Permission Issues
+
+**Symptoms**: "Permission denied" errors
+
+```bash
+# Error in logs:
+# "Failed to open database: Permission denied"
+```
+
+**Solution**:
+
+```bash
+# Fix ownership
+sudo chown -R sui:sui /opt/sui/db
+sudo chown -R sui:sui /opt/sui/config
+sudo chown -R sui:sui /opt/sui/key-pairs
+
+# Fix permissions
+sudo chmod 600 /opt/sui/key-pairs/*.key
+sudo chmod 644 /opt/sui/config/validator.yaml
+sudo chmod 644 /opt/sui/config/genesis.blob
+```
+
+### Missing Genesis File
+
+**Symptoms**: "Genesis file not found"
+
+**Solution**:
+
+```bash
+# Download genesis.blob
+cd /opt/sui/config
+
+# For mainnet
+sudo wget https://github.com/MystenLabs/sui-genesis/raw/main/mainnet/genesis.blob
+
+# For testnet
+sudo wget https://github.com/MystenLabs/sui-genesis/raw/main/testnet/genesis.blob
+
+sudo chown sui:sui genesis.blob
+```
+
+### Port Already in Use
+
+**Symptoms**: "Address already in use"
+
+```bash
+# Check which process is using the port
+sudo lsof -i :8080
+sudo lsof -i :9184
+
+# Or using netstat
+sudo netstat -tulpn | grep :8080
+```
+
+**Solutions**:
+
+```bash
+# Option 1: Kill the process using the port
+sudo kill <PID>
+
+# Option 2: Change port in configuration
+# Edit validator.yaml and change the conflicting port
+
+# Option 3: Stop conflicting service
+sudo systemctl stop <service-name>
+```
+
+## Sync Issues
+
+### Node Not Syncing
+
+**Symptoms**: Checkpoint number not increasing
+
+```bash
+# Check current checkpoint
+curl -s http://localhost:9184/metrics | grep highest_synced_checkpoint
+
+# Check again after 1 minute - should increase
+```
+
+**Diagnostic Steps**:
+
+<Steps>
+  <Step title="Check peer connections">
+    ```bash
+    curl -s http://localhost:9184/metrics | grep connected_peers
+    
+    # Should show > 0 peers
+    # If 0, check network connectivity
+    ```
+  </Step>
+
+  <Step title="Check network connectivity">
+    ```bash
+    # Test external connectivity
+    curl -v https://checkpoints.mainnet.sui.io
+    
+    # Check firewall rules
+    sudo iptables -L -n
+    sudo ufw status
+    ```
+  </Step>
+
+  <Step title="Check state sync configuration">
+    Verify `state-archive-read-config` in your config:
+    
+    ```yaml
+    state-archive-read-config:
+      - ingestion-url: https://checkpoints.mainnet.sui.io
+        concurrency: 5
+    ```
+  </Step>
+
+  <Step title="Check logs for sync errors">
+    ```bash
+    journalctl -u sui-node -f | grep -i "state_sync\|checkpoint"
+    ```
+  </Step>
+</Steps>
+
+### Slow Sync Speed
+
+**Symptoms**: Syncing but very slowly
+
+**Solutions**:
+
+```bash
+# Increase checkpoint download concurrency
+# In validator.yaml:
+p2p-config:
+  state-sync:
+    checkpoint-header-download-concurrency: 400
+    checkpoint-content-download-concurrency: 400
+    checkpoint-content-download-tx-concurrency: 50000
+
+# Check network bandwidth
+iftop  # Install: sudo apt install iftop
+
+# Check disk I/O
+iotop  # Install: sudo apt install iotop
+
+# Verify using fast storage (NVMe SSD)
+lsblk
+```
+
+### Stuck at Specific Checkpoint
+
+**Symptoms**: Sync stops at a specific checkpoint number
+
+**Solution**:
+
+```bash
+# Check logs for specific errors
+journalctl -u sui-node --since "10 minutes ago" | grep -i error
+
+# If database corruption suspected:
+# 1. Stop node
+sudo systemctl stop sui-node
+
+# 2. Backup current state
+sudo mv /opt/sui/db /opt/sui/db.backup
+
+# 3. Restore from recent snapshot or resync
+# See snapshots documentation
+
+# 4. Restart
+sudo systemctl start sui-node
+```
+
+## Performance Issues
+
+### High CPU Usage
+
+**Symptoms**: CPU usage consistently > 80%
+
+**Diagnostic**:
+
+```bash
+# Check CPU usage
+top -u sui
+
+# Check which threads are busy
+top -H -p $(pgrep sui-node)
+```
+
+**Solutions**:
+
+```bash
+# Reduce checkpoint execution concurrency
+# In validator.yaml:
+checkpoint-executor-config:
+  checkpoint-execution-max-concurrency: 100  # Reduce from 200
+
+# Reduce consensus pending transactions (validators)
+consensus-config:
+  max-pending-transactions: 10000  # Reduce from 20000
+```
+
+### High Memory Usage
+
+**Symptoms**: Memory usage approaching system limits
+
+**Diagnostic**:
+
+```bash
+# Check memory usage
+free -h
+
+# Check process memory
+sudo ps aux | grep sui-node
+
+# Check for memory leaks
+sudo pmap $(pgrep sui-node) | tail -1
+```
+
+**Solutions**:
+
+```bash
+# Reduce cache sizes in validator.yaml:
+execution-cache:
+  writeback-cache:
+    max-cache-size: 50000  # Reduce from 100000
+    object-cache-size: 50000
+    transaction-cache-size: 50000
+
+# Or use environment variables:
+export SUI_MAX_CACHE_SIZE=50000
+```
+
+### Disk I/O Bottleneck
+
+**Symptoms**: High disk wait times, slow checkpoint execution
+
+**Diagnostic**:
+
+```bash
+# Check I/O wait
+top  # Look at 'wa' percentage
+
+# Detailed I/O stats
+iostat -x 5  # Install: sudo apt install sysstat
+
+# Per-process I/O
+sudo iotop
+```
+
+**Solutions**:
+
+- Upgrade to NVMe SSD if using SATA SSD
+- Use dedicated disk for database
+- Enable aggressive pruning:
+
+```yaml
+authority-store-pruning-config:
+  num-epochs-to-retain: 0
+```
+
+## Network Issues
+
+### No Peer Connections
+
+**Symptoms**: `connected_peers` metric shows 0
+
+**Diagnostic**:
+
+```bash
+# Check if ports are open
+sudo netstat -tulpn | grep sui-node
+
+# Check firewall
+sudo iptables -L -n
+sudo ufw status
+
+# Test port connectivity from external machine
+nc -zv <your-ip> 8080
+nc -zuv <your-ip> 8084
+```
+
+**Solutions**:
+
+<Steps>
+  <Step title="Open required ports">
+    ```bash
+    # UFW
+    sudo ufw allow 8080/tcp
+    sudo ufw allow 8084/udp
+    
+    # iptables
+    sudo iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
+    sudo iptables -A INPUT -p udp --dport 8084 -j ACCEPT
+    sudo iptables-save | sudo tee /etc/iptables/rules.v4
+    ```
+  </Step>
+
+  <Step title="Configure external address">
+    Update validator.yaml:
+    
+    ```yaml
+    p2p-config:
+      external-address: /dns/your-domain.com/udp/8084
+      # Or with IP:
+      external-address: /ip4/YOUR.PUBLIC.IP/udp/8084
+    ```
+  </Step>
+
+  <Step title="Check cloud firewall">
+    For cloud providers, ensure security groups allow the ports:
+    - AWS: Check Security Groups
+    - GCP: Check Firewall Rules
+    - Azure: Check Network Security Groups
+  </Step>
+</Steps>
+
+### Connection Timeouts
+
+**Symptoms**: Frequent timeout errors in logs
+
+**Solution**:
+
+```yaml
+# Increase timeouts in validator.yaml:
+p2p-config:
+  state-sync:
+    timeout-ms: 30000  # Increase from 10000
+    checkpoint-content-timeout-ms: 120000  # Increase from 60000
+```
+
+## Validator-Specific Issues
+
+### Not Producing Blocks
+
+**Symptoms**: Validator is active but not proposing/voting
+
+**Diagnostic**:
+
+```bash
+# Check consensus metrics
+curl -s http://localhost:9184/metrics | grep -E "current_round|committed_subdags"
+
+# Check validator status on-chain
+sui validator display-metadata <your-address>
+```
+
+**Solutions**:
+
+- Ensure validator is in active set
+- Check all consensus ports are accessible
+- Verify protocol key is correct
+- Check for slashing/reporting
+
+### Key Mismatch Errors
+
+**Symptoms**: "Invalid signature" or "Key mismatch" errors
+
+**Solution**:
+
+```bash
+# Verify keys match on-chain registration
+sui validator display-metadata
+
+# If keys changed, update on-chain:
+sui validator update-metadata \
+  --protocol-pubkey <new-bls-pubkey> \
+  --network-pubkey <new-ed25519-pubkey>
+
+# Wait for next epoch for changes to take effect
+```
+
+## Database Issues
+
+### Database Corruption
+
+**Symptoms**: "Corruption" errors in logs, node crashes
+
+**Solution**:
+
+<Steps>
+  <Step title="Stop the node">
+    ```bash
+    sudo systemctl stop sui-node
+    ```
+  </Step>
+
+  <Step title="Backup corrupted database">
+    ```bash
+    sudo mv /opt/sui/db /opt/sui/db.corrupted
+    ```
+  </Step>
+
+  <Step title="Restore from snapshot or resync">
+    Option 1: Restore from backup snapshot
+    ```bash
+    sudo tar -xzf /backups/sui-db-latest.tar.gz -C /opt/sui/db
+    sudo chown -R sui:sui /opt/sui/db
+    ```
+    
+    Option 2: Resync from network (slower)
+    ```bash
+    sudo mkdir -p /opt/sui/db
+    sudo chown -R sui:sui /opt/sui/db
+    ```
+  </Step>
+
+  <Step title="Restart node">
+    ```bash
+    sudo systemctl start sui-node
+    journalctl -u sui-node -f
+    ```
+  </Step>
+</Steps>
+
+### Disk Full
+
+**Symptoms**: "No space left on device" errors
+
+**Immediate Actions**:
+
+```bash
+# Check disk usage
+df -h
+du -sh /opt/sui/db/*
+
+# Stop node to prevent further writes
+sudo systemctl stop sui-node
+
+# Emergency cleanup - reduce retention
+# Edit validator.yaml:
+authority-store-pruning-config:
+  num-epochs-to-retain: 0  # Aggressive pruning
+  num-epochs-to-retain-for-checkpoints: 2
+
+# Restart to trigger pruning
+sudo systemctl start sui-node
+
+# Monitor disk usage
+watch df -h
+```
+
+**Long-term Solutions**:
+
+- Add more storage
+- Enable aggressive pruning
+- Increase pruning frequency:
+
+```yaml
+authority-store-pruning-config:
+  pruning-run-delay-seconds: 30  # Run more frequently
+```
+
+## Docker-Specific Issues
+
+### Container Keeps Restarting
+
+**Diagnostic**:
+
+```bash
+# Check container status
+docker compose ps
+
+# Check container logs
+docker compose logs validator
+
+# Check exit code
+docker inspect validator | grep -A 5 State
+```
+
+**Solutions**:
+
+```bash
+# Fix common issues:
+# 1. Check volume mounts
+docker compose config
+
+# 2. Check image exists
+docker images | grep sui-node
+
+# 3. Rebuild with latest image
+docker compose pull
+docker compose up -d
+```
+
+### Volume Permission Issues
+
+**Symptoms**: Permission denied errors in Docker logs
+
+**Solution**:
+
+```bash
+# Find volume location
+docker volume inspect <volume-name>
+
+# Fix permissions
+sudo chown -R 1000:1000 /var/lib/docker/volumes/<volume-name>/_data
+
+# Or in docker-compose.yaml:
+services:
+  validator:
+    user: "1000:1000"
+```
+
+## Debugging Tools
+
+### Admin Interface
+
+The admin interface provides runtime debugging:
+
+```bash
+# Check node info
+curl localhost:1337/node-info
+
+# Change log level
+curl localhost:1337/logging -d "debug"
+
+# Enable trace logging for specific module
+curl localhost:1337/logging -d "info,state_sync=trace"
+```
+
+### Metrics Analysis
+
+```bash
+# Export all metrics for analysis
+curl -s http://localhost:9184/metrics > metrics.txt
+
+# Search for errors
+grep -i error metrics.txt
+
+# Check specific metrics
+grep "checkpoint" metrics.txt | sort
+```
+
+### Enable Verbose Logging
+
+Temporarily enable debug logging:
+
+```bash
+# Via admin interface (temporary)
+curl localhost:1337/logging -d "debug,narwhal=trace"
+
+# Via systemd override (permanent)
+sudo systemctl edit sui-node
+
+# Add:
+[Service]
+Environment="RUST_LOG=debug,sui_core=trace,consensus=trace"
+
+# Reload and restart
+sudo systemctl daemon-reload
+sudo systemctl restart sui-node
+```
+
+### Collecting Debug Information
+
+When seeking help, collect:
+
+```bash
+#!/bin/bash
+# collect-debug-info.sh
+
+OUTPUT="debug-$(date +%Y%m%d-%H%M%S)"
+mkdir -p $OUTPUT
+
+# System info
+uname -a > $OUTPUT/system-info.txt
+df -h > $OUTPUT/disk-usage.txt
+free -h > $OUTPUT/memory.txt
+
+# Node info
+sui-node --version > $OUTPUT/version.txt 2>&1
+cp /opt/sui/config/validator.yaml $OUTPUT/ 2>/dev/null
+
+# Metrics
+curl -s http://localhost:9184/metrics > $OUTPUT/metrics.txt
+
+# Recent logs
+journalctl -u sui-node --since "1 hour ago" > $OUTPUT/logs.txt
+
+# Network
+ss -tulpn | grep sui > $OUTPUT/network.txt
+
+# Compress
+tar -czf $OUTPUT.tar.gz $OUTPUT
+rm -rf $OUTPUT
+
+echo "Debug info collected: $OUTPUT.tar.gz"
+```
+
+## Getting Help
+
+### Community Support
+
+- **Discord**: [Sui Network Discord](https://discord.gg/sui) - #node-operator-support
+- **Forum**: [Sui Forum](https://forums.sui.io)
+- **GitHub**: [Sui Issues](https://github.com/MystenLabs/sui/issues)
+
+### Reporting Issues
+
+When reporting issues, include:
+
+1. Node type (validator/fullnode)
+2. Network (mainnet/testnet)
+3. Version (`sui-node --version`)
+4. Configuration (with sensitive data removed)
+5. Error messages from logs
+6. Steps to reproduce
+7. Debug information bundle
+
+### Emergency Contacts
+
+For critical validator issues:
+- Validator Discord channels
+- Emergency validator contact methods (provided during onboarding)

@@ -1,0 +1,311 @@
+---
+title: Setting Up a Validator
+description: Complete guide to setting up and running a Sui validator node with key management and on-chain registration.
+---
+
+Validators participate in Sui's consensus protocol and secure the network. This guide covers the complete process of setting up a validator node.
+
+## Prerequisites
+
+Before setting up a validator:
+
+- Meet the [validator system requirements](/operators/validator-requirements)
+- Have sufficient SUI for staking (minimum stake requirement)
+- Generate validator key pairs
+- Obtain genesis.blob for the target network
+
+## Key Generation
+
+Validators require four cryptographic key pairs:
+
+| Key | Scheme | Purpose |
+|-----|--------|----------|
+| protocol.key | BLS12381 | Transaction signing, consensus |
+| account.key | Ed25519 | Controls validator assets and staking |
+| network.key | Ed25519 | P2P networking, state sync |
+| worker.key | Ed25519 | Narwhal worker validation |
+
+### Generate Keys
+
+Using the Sui CLI:
+
+```bash
+# Download sui CLI
+wget https://releases.sui.io/$SUI_SHA/sui
+chmod +x sui
+
+# Generate protocol key (BLS12381)
+./sui keytool generate bls12381
+
+# Generate account, network, and worker keys (Ed25519)
+./sui keytool generate ed25519
+./sui keytool generate ed25519
+./sui keytool generate ed25519
+```
+
+This creates key files like:
+- `bls-0x1b7a4038f207d6c65cc106dd5be7270b3031e671fc8f9c1318b19e94a3bf3ed5.key`
+- `0x0061b30cdda02b6f55f575f1485a2890ec5c95b753deabbf823b6de7c936eb26.key`
+
+Rename and secure these files:
+
+```bash
+chmod 600 *.key
+mv bls-*.key protocol.key
+mv 0x*.key account.key
+# Rename remaining keys to network.key and worker.key
+```
+
+<Warning>
+  Store your private keys securely. Loss of these keys means loss of validator access and staked funds. Use hardware security modules (HSMs) or encrypted storage for production validators.
+</Warning>
+
+## Installation
+
+### Download Binary
+
+```bash
+export SUI_SHA=<version>
+wget https://releases.sui.io/$SUI_SHA/sui-node
+chmod +x sui-node
+sudo mv sui-node /opt/sui/bin/
+```
+
+### Using Docker
+
+```bash
+docker pull mysten/sui-node:$SUI_SHA
+```
+
+## Configuration
+
+<Steps>
+  <Step title="Create directory structure">
+    ```bash
+    sudo useradd sui
+    sudo mkdir -p /opt/sui/bin
+    sudo mkdir -p /opt/sui/config
+    sudo mkdir -p /opt/sui/db
+    sudo mkdir -p /opt/sui/key-pairs
+    sudo chown -R sui:sui /opt/sui
+    ```
+  </Step>
+
+  <Step title="Copy keys to the validator">
+    ```bash
+    sudo cp protocol.key account.key network.key worker.key /opt/sui/key-pairs/
+    sudo chmod 600 /opt/sui/key-pairs/*.key
+    sudo chown -R sui:sui /opt/sui/key-pairs
+    ```
+  </Step>
+
+  <Step title="Create validator configuration">
+    Create `/opt/sui/config/validator.yaml`:
+
+    ```yaml
+    protocol-key-pair:
+      path: /opt/sui/key-pairs/protocol.key
+    worker-key-pair:
+      path: /opt/sui/key-pairs/worker.key
+    network-key-pair:
+      path: /opt/sui/key-pairs/network.key
+    account-key-pair:
+      path: /opt/sui/key-pairs/account.key
+    db-path: /opt/sui/db/authorities_db
+    network-address: /ip4/0.0.0.0/tcp/8080/http
+    metrics-address: 0.0.0.0:9184
+    admin-interface-port: 1337
+    json-rpc-address: 0.0.0.0:9000
+
+    consensus-config:
+      db-path: /opt/sui/db/consensus_db
+
+    p2p-config:
+      listen-address: 0.0.0.0:8084
+      external-address: /dns/$HOSTNAME/udp/8084  # UPDATE THIS
+      anemo-config:
+        max-concurrent-connections: 0
+
+    genesis:
+      genesis-file-location: /opt/sui/config/genesis.blob
+
+    enable-index-processing: false
+
+    authority-store-pruning-config:
+      num-epochs-to-retain: 0
+      num-epochs-to-retain-for-checkpoints: 2
+
+    checkpoint-executor-config:
+      checkpoint-execution-max-concurrency: 200
+      local-execution-timeout-sec: 10
+
+    metrics:
+      push-interval-seconds: 60
+      push-url: https://metrics-proxy.mainnet.sui.io:8443/publish/metrics
+    ```
+  </Step>
+
+  <Step title="Copy genesis blob">
+    ```bash
+    sudo cp genesis.blob /opt/sui/config/
+    sudo chown sui:sui /opt/sui/config/genesis.blob
+    ```
+  </Step>
+</Steps>
+
+## Deployment
+
+### Using Systemd
+
+Create `/etc/systemd/system/sui-node.service`:
+
+```ini
+[Unit]
+Description=Sui Node
+
+[Service]
+User=sui
+WorkingDirectory=/opt/sui/
+Environment=RUST_BACKTRACE=1
+Environment=RUST_LOG=info,sui_core=debug,consensus=debug,jsonrpsee=error
+ExecStart=/opt/sui/bin/sui-node --config-path /opt/sui/config/validator.yaml
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable sui-node
+sudo systemctl start sui-node
+```
+
+### Using Docker Compose
+
+Create `docker-compose.yaml`:
+
+```yaml
+version: "3"
+
+services:
+  validator:
+    container_name: validator
+    image: mysten/sui-node:${SUI_SHA}
+    environment:
+      - RUST_BACKTRACE=1
+      - RUST_LOG=info,sui_core=debug,consensus=debug,jsonrpsee=error
+    ports:
+      - "8080:8080"
+      - "8081:8081/tcp"
+      - "8081:8081/udp"
+      - "8082:8082/udp"
+      - "8084:8084/udp"
+      - "9184:9184"
+    network_mode: "host"
+    volumes:
+      - ./validator.yaml:/opt/sui/config/validator.yaml:ro
+      - ./genesis.blob:/opt/sui/config/genesis.blob:ro
+      - ./key-pairs:/opt/sui/key-pairs/:ro
+      - /opt/sui/db:/opt/sui/db:rw
+    command:
+      [
+        "/opt/sui/bin/sui-node",
+        "--config-path",
+        "/opt/sui/config/validator.yaml",
+      ]
+    restart: on-failure
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "10"
+        max-size: "5g"
+```
+
+Start the validator:
+
+```bash
+export SUI_SHA=<version>
+docker compose up -d
+```
+
+## Network Configuration
+
+Open the following ports on your firewall:
+
+| Port | Protocol | Direction | Purpose |
+|------|----------|-----------|----------|
+| 8080 | TCP | Inbound | Protocol/transaction interface |
+| 8081 | TCP/UDP | Inbound/Outbound | Consensus interface |
+| 8082 | UDP | Inbound/Outbound | Narwhal worker |
+| 8084 | UDP | Inbound/Outbound | P2P state sync |
+| 8443 | TCP | Outbound | Metrics push |
+| 9184 | TCP | Localhost | Metrics scraping |
+
+## On-Chain Registration
+
+### Become a Validator Candidate
+
+<Steps>
+  <Step title="Create validator info">
+    ```bash
+    sui validator make-validator-info \
+      "My Validator" \
+      "Validator description" \
+      "https://example.com/image.png" \
+      "https://example.com" \
+      "validator.example.com" \
+      1000
+    ```
+
+    This generates `validator.info` and copies keys from your sui.keystore.
+  </Step>
+
+  <Step title="Submit candidacy on-chain">
+    ```bash
+    sui validator become-candidate validator.info
+    ```
+
+    Verify the transaction succeeded in the output.
+  </Step>
+
+  <Step title="Stake SUI tokens">
+    Stake tokens to your validator address. Once you have the minimum stake, you can join the committee.
+  </Step>
+
+  <Step title="Join the validator committee">
+    ```bash
+    sui validator join-committee
+    ```
+
+    You will become an active validator starting from the next epoch.
+  </Step>
+</Steps>
+
+## Verification
+
+Check validator status:
+
+```bash
+# View logs
+journalctl -u sui-node -f
+
+# Check metrics
+curl http://localhost:9184/metrics | grep highest_synced_checkpoint
+
+# Check on-chain metadata
+sui validator display-metadata
+```
+
+Monitor your validator on:
+- [Sui Explorer](https://suiscan.xyz/mainnet/validators)
+- [SuiVision](https://suivision.xyz/validators)
+
+## Next Steps
+
+- Configure [monitoring](/operators/monitoring) for your validator
+- Review [validator operations](/operators/validator-operations)
+- Understand [staking and rewards](/operators/staking-rewards)
+- Set up [committee management](/operators/committee-management)

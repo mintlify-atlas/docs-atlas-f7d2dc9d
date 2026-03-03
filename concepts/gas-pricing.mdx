@@ -1,0 +1,455 @@
+---
+title: Gas Mechanism and Pricing
+description: Understand how gas works on Sui, including computation costs, storage fees, and the storage rebate mechanism.
+---
+
+Sui's gas mechanism is designed to be predictable and fair, with separate accounting for computation and storage costs. Understanding gas helps you optimize your applications and provide better user experiences.
+
+## Gas Components
+
+Sui gas has three main components:
+
+```rust filename="crates/sui-types/src/gas.rs"
+pub struct GasCostSummary {
+    /// Cost of computation/execution
+    pub computation_cost: u64,
+    /// Storage cost, it's the sum of all storage cost for all objects created or mutated
+    pub storage_cost: u64,
+    /// The amount of storage cost refunded to the user for all objects deleted or mutated
+    pub storage_rebate: u64,
+    /// The fee for the rebate. The portion of the storage rebate kept by the system
+    pub non_refundable_storage_fee: u64,
+}
+```
+
+<CardGroup cols={3}>
+  <Card title="Computation Cost" icon="microchip">
+    Cost of executing Move bytecode instructions
+  </Card>
+  <Card title="Storage Cost" icon="database">
+    Cost of storing new or modified object data
+  </Card>
+  <Card title="Storage Rebate" icon="circle-dollar-to-slot">
+    Refund for deleting or modifying objects
+  </Card>
+</CardGroup>
+
+## Total Gas Calculation
+
+The total gas charged to a user is:
+
+```
+Total Gas Charged = computation_cost + storage_cost - storage_rebate
+```
+
+<Note>
+  The `non_refundable_storage_fee` is deducted from the storage rebate before it's returned to the user. This fee goes to the storage fund to ensure long-term sustainability.
+</Note>
+
+## Gas Pricing
+
+### Reference Gas Price (RGP)
+
+Sui uses a reference gas price set by validators:
+
+```rust filename="crates/sui-types/src/gas.rs"
+pub fn new(
+    gas_budget: u64,
+    gas_price: u64,
+    reference_gas_price: u64,
+    config: &ProtocolConfig,
+) -> SuiResult<Self> {
+    // gas price must be bigger or equal to reference gas price
+    if gas_price < reference_gas_price {
+        return Err(UserInputError::GasPriceUnderRGP {
+            gas_price,
+            reference_gas_price,
+        }
+        .into());
+    }
+    if check_for_gas_price_too_high(config.gas_model_version())
+        && gas_price >= config.max_gas_price()
+    {
+        return Err(UserInputError::GasPriceTooHigh {
+            max_gas_price: config.max_gas_price(),
+        }
+        .into());
+    }
+    // ...
+}
+```
+
+### Gas Price Rules
+
+<Tabs>
+  <Tab title="Minimum Price">
+    Transaction gas price must be >= reference gas price:
+    
+    ```typescript
+    const rgp = await client.getReferenceGasPrice();
+    tx.setGasPrice(rgp); // or higher
+    ```
+    
+    Transactions with gas price below RGP will be rejected.
+  </Tab>
+  
+  <Tab title="Maximum Price">
+    Gas price cannot exceed the protocol-defined maximum:
+    
+    ```rust
+    if gas_price >= config.max_gas_price() {
+        return Err(UserInputError::GasPriceTooHigh {
+            max_gas_price: config.max_gas_price(),
+        }
+        .into());
+    }
+    ```
+    
+    This prevents abuse and ensures fair pricing.
+  </Tab>
+  
+  <Tab title="System Transactions">
+    System transactions use a fixed gas price:
+    
+    ```rust filename="crates/sui-types/src/transaction.rs"
+    pub const GAS_PRICE_FOR_SYSTEM_TX: u64 = 1;
+    pub const DEFAULT_VALIDATOR_GAS_PRICE: u64 = 1000;
+    ```
+  </Tab>
+</Tabs>
+
+## Computation Costs
+
+Computation gas is charged based on:
+
+<CardGroup cols={2}>
+  <Card title="Instructions Executed" icon="gears">
+    Each Move bytecode instruction has a cost
+  </Card>
+  <Card title="Storage Operations" icon="hard-drive">
+    Reading and writing objects costs gas
+  </Card>
+  <Card title="Package Operations" icon="box">
+    Publishing and upgrading packages
+  </Card>
+  <Card title="Native Functions" icon="function">
+    Cryptographic operations and system calls
+  </Card>
+</CardGroup>
+
+### Typical Gas Costs
+
+From the source code:
+
+```rust filename="crates/sui-types/src/transaction.rs"
+pub const TEST_ONLY_GAS_UNIT_FOR_TRANSFER: u64 = 10_000;
+pub const TEST_ONLY_GAS_UNIT_FOR_OBJECT_BASICS: u64 = 50_000;
+pub const TEST_ONLY_GAS_UNIT_FOR_PUBLISH: u64 = 70_000;
+pub const TEST_ONLY_GAS_UNIT_FOR_STAKING: u64 = 50_000;
+pub const TEST_ONLY_GAS_UNIT_FOR_GENERIC: u64 = 50_000;
+pub const TEST_ONLY_GAS_UNIT_FOR_SPLIT_COIN: u64 = 10_000;
+pub const TEST_ONLY_GAS_UNIT_FOR_HEAVY_COMPUTATION_STORAGE: u64 = 5_000_000;
+```
+
+<Accordion title="Why are these 'TEST_ONLY'?">
+  These constants are used for testing and give rough estimates. Actual gas costs vary based on execution details and are computed dynamically.
+</Accordion>
+
+## Storage Costs
+
+Storage costs are based on object size:
+
+```
+storage_cost = object_size_bytes * storage_price_per_byte
+```
+
+### How Storage Charges Work
+
+<Steps>
+  <Step title="Object Creation">
+    When creating an object:
+    - Calculate: `size_bytes * storage_price_per_byte`
+    - Charge this amount from the gas budget
+    - Store as rebate in the object
+  </Step>
+  
+  <Step title="Object Modification">
+    When modifying an object:
+    - Release old version's storage rebate
+    - Charge new version's storage cost
+    - Net cost = new_cost - old_rebate
+  </Step>
+  
+  <Step title="Object Deletion">
+    When deleting an object:
+    - Full storage rebate minus non-refundable fee
+    - Refund goes back to transaction sender
+  </Step>
+</Steps>
+
+### Storage Fund
+
+The storage fund manages long-term storage sustainability:
+
+```move filename="crates/sui-framework/packages/sui-system/sources/storage_fund.move"
+public struct StorageFund has store {
+    total_object_storage_rebates: Balance<SUI>,
+    non_refundable_balance: Balance<SUI>,
+}
+
+public(package) fun advance_epoch(
+    self: &mut StorageFund,
+    storage_charges: Balance<SUI>,
+    storage_fund_reinvestment: Balance<SUI>,
+    leftover_staking_rewards: Balance<SUI>,
+    storage_rebate_amount: u64,
+    non_refundable_storage_fee_amount: u64,
+): Balance<SUI> {
+    // Join reinvestment and leftover rewards to non-refundable balance
+    self.non_refundable_balance.join(storage_fund_reinvestment);
+    self.non_refundable_balance.join(leftover_staking_rewards);
+
+    // Storage charges go into total rebates pool
+    self.total_object_storage_rebates.join(storage_charges);
+
+    // Split out non-refundable portion
+    let non_refundable_storage_fee = self
+        .total_object_storage_rebates
+        .split(non_refundable_storage_fee_amount);
+    
+    self.non_refundable_balance.join(non_refundable_storage_fee);
+
+    // Return refundable portion
+    let storage_rebate = self.total_object_storage_rebates.split(storage_rebate_amount);
+    storage_rebate
+}
+```
+
+## Gas Budget
+
+Every transaction must specify a gas budget:
+
+```typescript
+const tx = new Transaction();
+tx.setGasBudget(10_000_000); // 10M gas units
+```
+
+### Budget Guidelines
+
+<CardGroup cols={2}>
+  <Card title="Set Appropriately" icon="check">
+    High enough to complete but not wastefully high
+  </Card>
+  <Card title="Unused Budget Refunded" icon="rotate-left">
+    Only actual gas used is charged
+  </Card>
+  <Card title="Must Have Sufficient SUI" icon="coins">
+    Gas coins must cover full budget
+  </Card>
+  <Card title="Failed TXs Charge Gas" icon="exclamation-triangle">
+    Gas charged even if transaction fails
+  </Card>
+</CardGroup>
+
+<Warning>
+  If your transaction runs out of gas during execution, it will fail and you'll still be charged for the gas used up to that point.
+</Warning>
+
+## Gas Optimization Strategies
+
+### 1. Minimize Storage
+
+```move
+// Bad: Large object size
+public struct BadNFT has key {
+    id: UID,
+    full_image: vector<u8>,  // 10 MB image data
+    metadata: LargeStruct,    // Redundant data
+}
+
+// Good: Minimal on-chain storage
+public struct GoodNFT has key {
+    id: UID,
+    image_url: String,        // Reference to off-chain storage
+    essential_data: u64,      // Only critical data on-chain
+}
+```
+
+### 2. Batch Operations
+
+```typescript
+// Bad: Multiple transactions
+for (const recipient of recipients) {
+    const tx = new Transaction();
+    tx.transferObjects([coin], recipient);
+    await client.signAndExecuteTransaction({ transaction: tx, signer });
+}
+
+// Good: Single transaction with multiple operations
+const tx = new Transaction();
+for (const recipient of recipients) {
+    const [coin] = tx.splitCoins(tx.gas, [amount]);
+    tx.transferObjects([coin], recipient);
+}
+await client.signAndExecuteTransaction({ transaction: tx, signer });
+```
+
+### 3. Use Efficient Data Structures
+
+```move
+// Bad: Vector requires linear search
+public struct Registry has key {
+    id: UID,
+    items: vector<Item>,  // O(n) lookup
+}
+
+// Good: Table provides O(1) lookup
+public struct Registry has key {
+    id: UID,
+    items: Table<ID, Item>,  // O(1) lookup
+}
+```
+
+### 4. Delete Unused Objects
+
+```move
+public fun cleanup(old_obj: TempObject) {
+    let TempObject { id, .. } = old_obj;
+    id.delete();  // Recover storage rebate
+}
+```
+
+## Checking Gas Costs
+
+### Dry Run
+
+```typescript
+const tx = new Transaction();
+// ... build transaction
+
+const dryRun = await client.dryRunTransactionBlock({
+    transactionBlock: await tx.build({ client }),
+});
+
+const gasUsed = dryRun.effects.gasUsed;
+console.log('Computation:', gasUsed.computationCost);
+console.log('Storage:', gasUsed.storageCost);
+console.log('Rebate:', gasUsed.storageRebate);
+console.log('Total:', 
+    BigInt(gasUsed.computationCost) + 
+    BigInt(gasUsed.storageCost) - 
+    BigInt(gasUsed.storageRebate)
+);
+```
+
+### Inspect Transaction Effects
+
+```typescript
+const result = await client.getTransactionBlock({
+    digest: 'transaction_digest',
+    options: { showEffects: true },
+});
+
+const gas = result.effects!.gasUsed;
+console.log('Gas summary:', gas);
+```
+
+## Special Cases
+
+### Unmetered Gas
+
+Some system operations run without gas metering:
+
+```rust filename="crates/sui-types/src/gas.rs"
+pub fn new_unmetered() -> Self {
+    Self::V2(SuiGasStatusV2::new_unmetered())
+}
+```
+
+This is used for:
+- Genesis transactions
+- System state updates
+- Validator operations
+
+### Coin-Specific Optimizations
+
+Coins have optimized storage access:
+
+```rust filename="crates/sui-types/src/object.rs"
+/// Return the `value: u64` field of a `Coin<T>` type.
+/// Useful for reading the coin without deserializing the object into a Move value
+pub fn get_coin_value_unsafe(&self) -> u64 {
+    debug_assert!(self.type_.is_coin());
+    // 32 bytes for object ID, 8 for balance
+    debug_assert!(self.contents.len() == 40);
+    u64::from_le_bytes(<[u8; 8]>::try_from(&self.contents[ID_END_INDEX..]).unwrap())
+}
+
+/// Update the `value: u64` field of a `Coin<T>` type.
+pub fn set_coin_value_unsafe(&mut self, value: u64) {
+    debug_assert!(self.type_.is_coin());
+    // 32 bytes for object ID, 8 for balance
+    debug_assert!(self.contents.len() == 40);
+    self.contents.splice(ID_END_INDEX.., value.to_le_bytes());
+}
+```
+
+This allows Sui to update coin balances without full deserialization, saving gas.
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Set realistic gas budgets">
+    Use dry run to estimate and add 20-30% buffer:
+    
+    ```typescript
+    const dryRun = await client.dryRunTransactionBlock({...});
+    const estimatedGas = BigInt(dryRun.effects.gasUsed.computationCost) +
+                         BigInt(dryRun.effects.gasUsed.storageCost);
+    tx.setGasBudget(Number(estimatedGas * 130n / 100n)); // 30% buffer
+    ```
+  </Accordion>
+  
+  <Accordion title="Monitor gas costs in production">
+    Track actual gas usage to identify optimization opportunities:
+    
+    ```typescript
+    const costs = [];
+    for (const tx of transactions) {
+        const result = await client.getTransactionBlock({ digest: tx });
+        costs.push(result.effects.gasUsed);
+    }
+    // Analyze costs for patterns
+    ```
+  </Accordion>
+  
+  <Accordion title="Optimize storage usage">
+    - Store large data off-chain (IPFS, Arweave)
+    - Use dynamic fields for optional data
+    - Delete temporary objects
+    - Minimize object size
+  </Accordion>
+  
+  <Accordion title="Consider gas sponsorship">
+    For better UX, sponsor gas for users:
+    
+    ```typescript
+    tx.setGasOwner(sponsorAddress);
+    // Sponsor signs separately
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="Transaction Lifecycle" href="/concepts/transaction-lifecycle" icon="clock">
+    Understand transaction execution
+  </Card>
+  <Card title="Sponsored Transactions" href="/concepts/sponsored-transactions" icon="hand-holding-dollar">
+    Enable gasless transactions
+  </Card>
+  <Card title="Storage Fund" href="/concepts/storage-fund" icon="vault">
+    Learn about storage economics
+  </Card>
+</CardGroup>

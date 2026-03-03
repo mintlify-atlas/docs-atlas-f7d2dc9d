@@ -1,0 +1,448 @@
+---
+title: Transaction Lifecycle
+description: Follow a transaction's journey from submission through execution to finality on the Sui blockchain.
+---
+
+Understanding how transactions move through Sui's system helps you build more efficient applications and debug issues effectively. The lifecycle varies based on whether the transaction uses owned or shared objects.
+
+## Transaction Lifecycle Overview
+
+<Steps>
+  <Step title="Transaction Construction">
+    User or application builds a transaction with commands and arguments
+  </Step>
+  <Step title="Signing">
+    Transaction is signed by the sender's private key
+  </Step>
+  <Step title="Submission">
+    Signed transaction is submitted to a validator or fullnode
+  </Step>
+  <Step title="Validation">
+    Transaction is validated for correctness and gas sufficiency
+  </Step>
+  <Step title="Execution Path Selection">
+    System determines if fast path (owned objects) or consensus path (shared objects) is needed
+  </Step>
+  <Step title="Execution">
+    Transaction executes and produces effects
+  </Step>
+  <Step title="Finalization">
+    Effects are finalized and transaction becomes immutable
+  </Step>
+  <Step title="Indexing">
+    Transaction and effects are indexed for querying
+  </Step>
+</Steps>
+
+## Fast Path vs Consensus Path
+
+<Tabs>
+  <Tab title="Fast Path (Owned Objects)">
+    Transactions using only owned objects skip consensus:
+    
+    ```
+    Client
+      ↓ Submit TX
+    Fullnode
+      ↓ Forward to validators
+    Validators (parallel)
+      ↓ Execute independently
+      ↓ Return signed effects
+    Fullnode
+      ↓ Collect 2f+1 signatures
+      ↓ Form certificate
+    ✓ Finalized (~400ms)
+    ```
+    
+    **Benefits:**
+    - Sub-second finality (~400ms)
+    - No consensus overhead
+    - Parallel execution
+    - Lower latency
+    
+    **Requirements:**
+    - All objects must be owned by sender
+    - No shared objects involved
+  </Tab>
+  
+  <Tab title="Consensus Path (Shared Objects)">
+    Transactions with shared objects go through consensus:
+    
+    ```
+    Client
+      ↓ Submit TX
+    Fullnode
+      ↓ Forward to validators
+    Validators
+      ↓ Submit to consensus
+    Consensus
+      ↓ Order transaction
+      ↓ Assign sequence number
+    Validators
+      ↓ Execute in order
+      ↓ Return signed effects
+    Fullnode
+      ↓ Collect 2f+1 signatures
+      ↓ Form certificate
+    ✓ Finalized (~2-3 seconds)
+    ```
+    
+    **Characteristics:**
+    - Higher latency (2-3 seconds)
+    - Total ordering of transactions
+    - Prevents conflicts
+    - Required for shared state
+  </Tab>
+</Tabs>
+
+## Transaction Validation
+
+Before execution, transactions undergo multiple validation checks:
+
+### Gas Validation
+
+```rust filename="crates/sui-types/src/gas.rs"
+impl SuiGasStatus {
+    pub fn new(
+        gas_budget: u64,
+        gas_price: u64,
+        reference_gas_price: u64,
+        config: &ProtocolConfig,
+    ) -> SuiResult<Self> {
+        // gas price must be bigger or equal to reference gas price
+        if gas_price < reference_gas_price {
+            return Err(UserInputError::GasPriceUnderRGP {
+                gas_price,
+                reference_gas_price,
+            }
+            .into());
+        }
+        if check_for_gas_price_too_high(config.gas_model_version())
+            && gas_price >= config.max_gas_price()
+        {
+            return Err(UserInputError::GasPriceTooHigh {
+                max_gas_price: config.max_gas_price(),
+            }
+            .into());
+        }
+        Ok(Self::V2(SuiGasStatusV2::new_with_budget(
+            gas_budget,
+            gas_price,
+            reference_gas_price,
+            config,
+        )))
+    }
+}
+```
+
+### Checks Performed
+
+<CardGroup cols={2}>
+  <Card title="Gas Price" icon="dollar-sign">
+    Must be >= reference gas price and < max gas price
+  </Card>
+  <Card title="Gas Budget" icon="wallet">
+    Sender must have enough SUI in gas coins
+  </Card>
+  <Card title="Object Ownership" icon="key">
+    All owned objects must belong to sender
+  </Card>
+  <Card title="Object Versions" icon="code-branch">
+    Object versions must match current state
+  </Card>
+  <Card title="Type Arguments" icon="shapes">
+    Type arguments must not exceed depth/count limits
+  </Card>
+  <Card title="Signature" icon="signature">
+    Transaction signature must be valid
+  </Card>
+</CardGroup>
+
+## Execution Process
+
+### Pre-Execution
+
+1. **Lock Objects**: Acquire locks on all input objects
+2. **Load State**: Read object data from storage
+3. **Initialize Gas**: Set up gas tracking
+
+### Execution
+
+```rust filename="crates/sui-types/src/gas.rs"
+pub trait SuiGasStatusAPI {
+    fn is_unmetered(&self) -> bool;
+    fn move_gas_status(&self) -> &GasStatus;
+    fn move_gas_status_mut(&mut self) -> &mut GasStatus;
+    fn bucketize_computation(&mut self, aborted: Option<bool>) -> Result<(), ExecutionError>;
+    fn summary(&self) -> GasCostSummary;
+    fn gas_budget(&self) -> u64;
+    fn gas_price(&self) -> u64;
+    fn reference_gas_price(&self) -> u64;
+    fn storage_gas_units(&self) -> u64;
+    fn storage_rebate(&self) -> u64;
+    fn unmetered_storage_rebate(&self) -> u64;
+    fn gas_used(&self) -> u64;
+    fn charge_storage_read(&mut self, size: usize) -> Result<(), ExecutionError>;
+    fn charge_publish_package(&mut self, size: usize) -> Result<(), ExecutionError>;
+    fn track_storage_mutation(
+        &mut self,
+        object_id: ObjectID,
+        new_size: usize,
+        storage_rebate: u64,
+    ) -> u64;
+    fn charge_storage_and_rebate(&mut self) -> Result<(), ExecutionError>;
+}
+```
+
+For each command in the transaction:
+1. **Charge gas** for computation
+2. **Execute command** (Move call, transfer, etc.)
+3. **Update state** (modify objects, emit events)
+4. **Track changes** for gas accounting
+
+### Post-Execution
+
+1. **Calculate Storage Costs**: Based on object size changes
+2. **Apply Storage Rebates**: For deleted/modified objects
+3. **Update Gas Coin**: Deduct total gas cost
+4. **Generate Effects**: Record all state changes
+5. **Release Locks**: Free object locks
+
+## Transaction Effects
+
+After execution, the transaction produces effects:
+
+<AccordionGroup>
+  <Accordion title="Status">
+    Success or failure with error details
+  </Accordion>
+  
+  <Accordion title="Gas Summary">
+    ```rust filename="crates/sui-types/src/gas.rs"
+    pub struct GasCostSummary {
+        /// Cost of computation/execution
+        pub computation_cost: u64,
+        /// Storage cost, it's the sum of all storage cost for all objects created or mutated
+        pub storage_cost: u64,
+        /// The amount of storage cost refunded to the user for all objects deleted or mutated
+        pub storage_rebate: u64,
+        /// The fee for the rebate. The portion of the storage rebate kept by the system
+        pub non_refundable_storage_fee: u64,
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Object Changes">
+    - Created objects
+    - Modified objects (with new versions)
+    - Deleted objects
+    - Wrapped/unwrapped objects
+  </Accordion>
+  
+  <Accordion title="Events">
+    Custom events emitted during execution
+  </Accordion>
+  
+  <Accordion title="Dependencies">
+    Other transactions this one depends on
+  </Accordion>
+</AccordionGroup>
+
+## Gas Computation
+
+Gas is charged for multiple components:
+
+```rust filename="crates/sui-types/src/gas.rs"
+/// Summary of the charges in a transaction.
+/// Storage is charged independently of computation.
+/// There are 3 parts to the storage charges:
+/// `storage_cost`: it is the charge of storage at the time the transaction is executed.
+///                 The cost of storage is the number of bytes of the objects being mutated
+///                 multiplied by a variable storage cost per byte
+/// `storage_rebate`: this is the amount a user gets back when manipulating an object.
+///                   The `storage_rebate` is the `storage_cost` for an object minus fees.
+/// `non_refundable_storage_fee`: not all the value of the object storage cost is
+///                               given back to user and there is a small fraction that
+///                               is kept by the system. This value tracks that charge.
+///
+/// When looking at a gas cost summary the amount charged to the user is
+/// `computation_cost + storage_cost - storage_rebate`
+/// and that is the amount that is deducted from the gas coins.
+```
+
+### Gas Calculation Formula
+
+```
+Total Gas = computation_cost + storage_cost - storage_rebate
+
+where:
+  computation_cost = instructions_executed * computation_gas_price
+  storage_cost = sum(new_object_sizes * storage_price_per_byte)
+  storage_rebate = sum(old_object_rebates) - non_refundable_fee
+```
+
+## Transaction Finality
+
+Transactions achieve finality when:
+
+<Tabs>
+  <Tab title="Owned Objects (Fast Path)">
+    1. **2f+1 validators** sign the transaction effects
+    2. **Certificate formed** with collected signatures
+    3. **Immediately final** - cannot be reverted
+    4. **Timeline**: ~400ms from submission
+  </Tab>
+  
+  <Tab title="Shared Objects (Consensus)">
+    1. **Consensus orders** the transaction
+    2. **All validators execute** in same order
+    3. **2f+1 validators** sign the effects
+    4. **Certificate formed** with signatures
+    5. **Checkpoint inclusion** for full finality
+    6. **Timeline**: ~2-3 seconds from submission
+  </Tab>
+</Tabs>
+
+## Error Handling
+
+Transactions can fail at different stages:
+
+<CardGroup cols={2}>
+  <Card title="Pre-Execution Errors" icon="circle-xmark">
+    - Invalid signature
+    - Insufficient gas
+    - Invalid object references
+    - Type argument violations
+  </Card>
+  <Card title="Execution Errors" icon="exclamation-triangle">
+    - Out of gas
+    - Assertion failures
+    - Arithmetic overflows
+    - Access control violations
+  </Card>
+</CardGroup>
+
+<Warning>
+  Even if a transaction fails during execution, gas is still charged up to the point of failure. This prevents spam attacks.
+</Warning>
+
+## Checkpoints
+
+Transactions are grouped into checkpoints for additional finality guarantees:
+
+```rust filename="crates/sui-types/src/transaction.rs"
+pub struct ChangeEpoch {
+    /// The next (to become) epoch ID
+    pub epoch: EpochId,
+    /// The protocol version in effect in the new epoch
+    pub protocol_version: ProtocolVersion,
+    /// The total amount of gas charged for storage during the epoch
+    pub storage_charge: u64,
+    /// The total amount of gas charged for computation during the epoch
+    pub computation_charge: u64,
+    /// The amount of storage rebate refunded to the txn senders
+    pub storage_rebate: u64,
+    /// The non-refundable storage fee
+    pub non_refundable_storage_fee: u64,
+    /// Unix timestamp when epoch started
+    pub epoch_start_timestamp_ms: u64,
+}
+```
+
+## Monitoring Transactions
+
+### Query Transaction Status
+
+```typescript
+const txResult = await client.getTransactionBlock({
+    digest: 'transaction_digest',
+    options: {
+        showEffects: true,
+        showEvents: true,
+        showObjectChanges: true,
+    },
+});
+
+console.log('Status:', txResult.effects.status);
+console.log('Gas used:', txResult.effects.gasUsed);
+```
+
+### Wait for Transaction
+
+```typescript
+const tx = new Transaction();
+// ... build transaction
+
+const result = await client.signAndExecuteTransaction({
+    transaction: tx,
+    signer: keypair,
+    options: {
+        showEffects: true,
+        showObjectChanges: true,
+    },
+});
+
+// Transaction is already finalized here
+console.log('Digest:', result.digest);
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Handle failures gracefully">
+    Always check transaction status before assuming success:
+    
+    ```typescript
+    if (result.effects.status.status !== 'success') {
+        console.error('Transaction failed:', result.effects.status.error);
+        // Handle error
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Set appropriate timeouts">
+    - Fast path: 1-2 second timeout
+    - Consensus path: 5-10 second timeout
+    - Network congestion: Add extra buffer
+  </Accordion>
+  
+  <Accordion title="Monitor gas costs">
+    Track actual vs expected gas costs to optimize:
+    
+    ```typescript
+    const gasUsed = result.effects.gasUsed;
+    const totalCost = BigInt(gasUsed.computationCost) + 
+                      BigInt(gasUsed.storageCost) - 
+                      BigInt(gasUsed.storageRebate);
+    ```
+  </Accordion>
+  
+  <Accordion title="Use dry run for complex transactions">
+    Test transactions before submission:
+    
+    ```typescript
+    const dryRunResult = await client.dryRunTransactionBlock({
+        transactionBlock: await tx.build({ client }),
+    });
+    
+    if (dryRunResult.effects.status.status === 'success') {
+        // Safe to submit
+        await client.signAndExecuteTransaction({...});
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="Transactions" href="/concepts/transactions" icon="arrow-right-arrow-left">
+    Learn about transaction structure
+  </Card>
+  <Card title="Gas Pricing" href="/concepts/gas-pricing" icon="gas-pump">
+    Understand gas costs
+  </Card>
+  <Card title="Objects" href="/concepts/objects" icon="cube">
+    Learn about object model
+  </Card>
+</CardGroup>

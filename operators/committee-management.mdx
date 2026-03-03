@@ -1,0 +1,546 @@
+---
+title: Committee Management
+description: Understanding validator committee selection, epoch management, and committee operations in Sui.
+---
+
+The validator committee is the set of active validators participating in Sui consensus. This guide covers committee structure, selection, and management.
+
+## Committee Overview
+
+The Sui validator committee:
+
+- **Active validators**: Currently participating in consensus
+- **Candidate validators**: Registered but not in active set
+- **Pending validators**: Will join in next epoch
+- **Leaving validators**: Will exit in next epoch
+
+### Committee Size
+
+Committee size varies based on network:
+
+- **Mainnet**: ~100-150 validators
+- **Testnet**: ~50-100 validators
+- **Dynamic**: Size can change through governance
+
+## Epoch System
+
+### Epoch Duration
+
+- **Mainnet**: 24 hours
+- **Testnet**: Typically 24 hours (may vary)
+- **Devnet**: Often shorter for testing
+
+### Epoch Boundaries
+
+At each epoch boundary:
+
+1. Reward distribution occurs
+2. Committee membership updates
+3. Metadata changes take effect
+4. Staking changes activate
+5. New epoch begins
+
+### Checking Current Epoch
+
+```bash
+# Query current epoch
+curl -X POST http://localhost:9000 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getLatestSuiSystemState",
+    "params": []
+  }' | jq '.result.epoch'
+
+# Via CLI
+sui client call --package 0x3 --module sui_system \
+  --function get_current_epoch \
+  --args 0x5
+```
+
+## Committee Selection
+
+### Selection Criteria
+
+Validators are selected for the active committee based on:
+
+1. **Minimum stake**: Must meet or exceed minimum requirement
+2. **Stake ranking**: Higher stake increases probability of selection
+3. **Committee size limit**: Only top validators by stake are selected
+4. **Active status**: Must not be in leaving or slashed state
+
+### Stake-Weighted Selection
+
+Validators with more total stake (self-stake + delegated) have:
+
+- Higher chance of inclusion in active set
+- Greater voting power in consensus
+- Larger share of rewards
+
+### Checking Committee Membership
+
+```bash
+# List all active validators
+sui client call --package 0x3 --module sui_system \
+  --function get_validators \
+  --args 0x5
+
+# Check if specific validator is active
+sui validator display-metadata <address> | grep "active"
+```
+
+View on explorers:
+- [Suiscan Validators](https://suiscan.xyz/mainnet/validators)
+- [SuiVision Validators](https://suivision.xyz/validators)
+
+## Joining the Committee
+
+### Prerequisites
+
+Before joining:
+
+1. ✅ Complete validator setup
+2. ✅ Register as candidate
+3. ✅ Accumulate minimum stake
+4. ✅ Fully sync node with network
+5. ✅ Verify all ports accessible
+6. ✅ Test node performance
+
+### Registration Process
+
+<Steps>
+  <Step title="Generate validator info">
+    ```bash
+    sui validator make-validator-info \
+      "Validator Name" \
+      "Description" \
+      "https://example.com/logo.png" \
+      "https://example.com" \
+      "validator.example.com" \
+      1000
+    ```
+  </Step>
+
+  <Step title="Become candidate">
+    ```bash
+    sui validator become-candidate validator.info
+    ```
+    
+    Verify transaction succeeded:
+    ```bash
+    sui validator display-metadata
+    ```
+  </Step>
+
+  <Step title="Accumulate stake">
+    - Self-stake SUI tokens
+    - Attract delegations
+    - Monitor total stake:
+    
+    ```bash
+    sui validator display-metadata | grep "total_stake"
+    ```
+  </Step>
+
+  <Step title="Join committee">
+    Once minimum stake reached:
+    
+    ```bash
+    sui validator join-committee
+    ```
+    
+    You'll become active at next epoch boundary.
+  </Step>
+</Steps>
+
+### Activation Timeline
+
+```
+Time 0:00  - Submit join-committee request
+Time 0:00  - Status: Pending Validator
+Time 24:00 - Epoch boundary
+Time 24:00 - Status: Active Validator
+Time 24:00 - Begin consensus participation
+```
+
+## Leaving the Committee
+
+### Voluntary Exit
+
+To leave the active validator set:
+
+```bash
+sui validator leave-committee
+```
+
+**Effects**:
+- Remain active until next epoch
+- Removed at epoch boundary
+- Staking pool becomes inactive
+- Stop earning rewards
+- Delegators can unstake
+
+### Exit Timeline
+
+```
+Time 0:00  - Submit leave-committee request
+Time 0:00  - Status: Leaving Validator
+Time 24:00 - Epoch boundary
+Time 24:00 - Status: Inactive Candidate
+Time 24:00 - Staking pool deactivated
+```
+
+### Involuntary Removal
+
+Validators can be removed for:
+
+1. **Insufficient stake**: Falling below minimum
+2. **Slashing**: Byzantine behavior reported by 2f+1 validators
+3. **Inactivity**: Extended downtime or non-participation
+
+## Validator States
+
+### State Transitions
+
+```
+Not Registered
+      |
+      v
+  Candidate ←→ Active Validator
+      ↑            |
+      |            v
+      └──── Inactive/Slashed
+```
+
+### Candidate
+
+- Registered validator
+- Not in active set
+- Can accept stake
+- Can join committee if sufficient stake
+
+**Check candidate status**:
+
+```bash
+sui validator display-metadata | grep "pending"
+```
+
+### Active Validator
+
+- In current committee
+- Participating in consensus
+- Earning rewards
+- Can be delegated to
+
+**Responsibilities**:
+- Maintain node uptime
+- Participate in consensus
+- Process transactions
+- Submit gas price quotes
+
+### Pending Validator
+
+- Requested to join committee
+- Will activate next epoch
+- Should ensure node is ready
+
+**Preparation**:
+- Verify node fully synced
+- Confirm all ports accessible
+- Monitor for epoch boundary
+- Ready to start consensus
+
+### Leaving Validator
+
+- Requested to leave committee
+- Still active current epoch
+- Will deactivate next epoch
+
+**Actions**:
+- Complete current epoch normally
+- Communicate with delegators
+- Prepare for deactivation
+
+### Inactive/Slashed
+
+- Removed from committee
+- Not earning rewards
+- May have reduced stake (if slashed)
+
+**Recovery**:
+- Address removal cause
+- Restore stake if needed
+- Rejoin as candidate
+- Request committee membership
+
+## Committee Operations
+
+### Voting Power
+
+Voting power in consensus:
+
+```
+Voting Power = Validator Stake / Total Committee Stake
+```
+
+**Example**:
+```
+Validator stake: 50M SUI
+Total committee stake: 2B SUI
+Voting power: 50M / 2B = 2.5%
+```
+
+Higher voting power:
+- More influence in consensus
+- Higher rewards potential
+- Greater responsibility
+
+### Consensus Participation
+
+Active validators must:
+
+1. **Propose blocks**: When elected as leader
+2. **Vote on proposals**: Participate in each round
+3. **Sign certificates**: Validate transactions
+4. **Maintain state**: Keep synced with network
+
+**Monitoring participation**:
+
+```bash
+# Check consensus metrics
+curl -s http://localhost:9184/metrics | grep -E \
+  "current_round|committed_subdags|consensus_votes"
+```
+
+### Quorum Requirements
+
+Consensus requires:
+
+- **2f+1 stake**: For quorum (f = faulty validators)
+- **Byzantine fault tolerance**: Tolerates up to f failures
+- **Liveness**: Requires >2f+1 honest validators
+
+**Example** (with 100M total stake):
+- f = 33M stake can be faulty
+- Quorum = 67M stake needed
+- Safety maintained if less than 33M stake byzantine
+
+## Stake Management
+
+### Monitoring Total Stake
+
+```bash
+# Check your validator's stake
+sui validator display-metadata | grep -E "total_stake|self_stake"
+
+# Check minimum requirement
+sui client call --package 0x3 --module sui_system \
+  --function get_min_validator_stake \
+  --args 0x5
+```
+
+### Stake Changes
+
+Stake changes at epoch boundaries:
+
+1. **Delegations**: New delegations activate
+2. **Unstaking**: Withdrawal requests complete
+3. **Rewards**: Automatically added to stake
+4. **Slashing**: Penalty applied if reported
+
+### Self-Stake Management
+
+Validators can adjust self-stake:
+
+```bash
+# Add self-stake
+sui client call --package 0x3 --module sui_system \
+  --function request_add_stake \
+  --args 0x5 <stake-coin-object>
+
+# Request unstake
+sui client call --package 0x3 --module sui_system \
+  --function request_withdraw_stake \
+  --args 0x5 <staked-sui-object> <amount>
+```
+
+<Warning>
+  Ensure total stake stays above minimum when withdrawing. Falling below minimum results in removal from active set.
+</Warning>
+
+## Validator Ranking
+
+### Ranking Factors
+
+Validators are ranked by:
+
+1. **Total stake**: Primary ranking factor
+2. **Performance**: Uptime and participation
+3. **Commission rate**: Lower can attract more delegation
+4. **Reputation**: Track record and reliability
+
+### Checking Rankings
+
+View validator rankings:
+
+- [Suiscan Rankings](https://suiscan.xyz/mainnet/validators)
+- [SuiVision Rankings](https://suivision.xyz/validators)
+
+**Via RPC**:
+
+```bash
+curl -X POST http://localhost:9000 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getValidatorsApy",
+    "params": []
+  }' | jq '.result.apys | sort_by(.apy) | reverse'
+```
+
+## Delegation Dynamics
+
+### Attracting Delegations
+
+Factors delegators consider:
+
+1. **Performance history**: Uptime and participation
+2. **Commission rate**: Competitive pricing
+3. **Stake size**: Indicator of trust/success
+4. **Reputation**: Community standing
+5. **Communication**: Transparency and updates
+
+### Managing Delegations
+
+As a validator:
+
+- Monitor delegation changes
+- Communicate with delegators
+- Maintain transparency
+- Provide regular updates
+- Announce changes in advance
+
+### Delegation Limits
+
+No hard limit on delegations, but:
+
+- Very high stake may centralize network
+- Voting power caps may apply through governance
+- Consider network health
+
+## Governance Participation
+
+### Proposal Voting
+
+Validators vote on:
+
+- Protocol upgrades
+- Parameter changes
+- Network policies
+- Economic parameters
+
+### Voting Weight
+
+Based on stake:
+
+```
+Vote Weight = Validator Total Stake / Network Total Stake
+```
+
+### Best Practices
+
+1. **Stay informed**: Follow governance discussions
+2. **Review proposals**: Understand implications
+3. **Vote actively**: Participate in governance
+4. **Communicate**: Share voting rationale with delegators
+5. **Consider delegators**: Votes affect their stake too
+
+## Committee Health
+
+### Monitoring Committee
+
+Check overall committee health:
+
+```bash
+# View committee size
+curl -X POST http://localhost:9000 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getValidatorsApy",
+    "params": []
+  }' | jq '.result.apys | length'
+
+# Check stake distribution
+curl -X POST http://localhost:9000 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getLatestSuiSystemState",
+    "params": []
+  }' | jq '.result.activeValidators | map(.stakingPoolSuiBalance)'
+```
+
+### Decentralization Metrics
+
+- **Nakamoto coefficient**: Minimum validators for 33% stake
+- **Geographic distribution**: Validator locations
+- **Client diversity**: Node software variations
+- **Stake distribution**: Concentration vs. distribution
+
+## Emergency Procedures
+
+### Committee Disruption
+
+If committee is disrupted:
+
+1. Check validator health
+2. Monitor Discord announcements
+3. Review logs for errors
+4. Contact other validators
+5. Follow emergency procedures
+
+### Fork Scenarios
+
+In case of network fork:
+
+- Follow official guidance
+- Do not modify configuration without instruction
+- Coordinate with other validators
+- Wait for resolution from Mysten Labs
+
+## Best Practices
+
+### Committee Participation
+
+1. **Maintain readiness**: Keep node healthy and updated
+2. **Monitor actively**: Watch for epoch transitions
+3. **Communicate clearly**: Inform delegators of changes
+4. **Plan ahead**: Coordinate maintenance with epochs
+5. **Stay informed**: Follow network updates
+
+### Operational Standards
+
+1. **High availability**: >99.5% uptime
+2. **Fast updates**: Apply within 24-48 hours
+3. **Active monitoring**: 24/7 alerting
+4. **Backup systems**: Redundancy for critical components
+5. **Documentation**: Maintain operational procedures
+
+## Resources
+
+### Monitoring Tools
+
+- [Sui Explorer](https://suiscan.xyz/mainnet/validators)
+- [SuiVision](https://suivision.xyz/validators)
+- [Sui Metrics](https://metrics.sui.io)
+
+### Documentation
+
+- [Validator Operations](/operators/validator-operations)
+- [Staking and Rewards](/operators/staking-rewards)
+- [Validator Requirements](/operators/validator-requirements)

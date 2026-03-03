@@ -1,0 +1,581 @@
+---
+title: Capability Pattern
+description: Implement secure access control using capabilities on Sui
+---
+
+Capabilities are a powerful pattern for access control in Move. Instead of checking addresses, you grant specific permissions through unforgeable objects.
+
+## What are Capabilities?
+
+Capabilities are objects that grant specific permissions. Only the holder of a capability can perform the associated actions.
+
+### Basic Capability
+
+```move
+module my_package::vault {
+    /// Capability to manage the vault
+    public struct AdminCap has key, store {
+        id: UID,
+    }
+
+    public struct Vault has key {
+        id: UID,
+        balance: u64,
+    }
+
+    /// Initialize creates the vault and admin capability
+    fun init(ctx: &mut TxContext) {
+        let vault = Vault {
+            id: object::new(ctx),
+            balance: 0,
+        };
+        transfer::share_object(vault);
+
+        // Create admin capability
+        let admin_cap = AdminCap {
+            id: object::new(ctx),
+        };
+        transfer::transfer(admin_cap, ctx.sender());
+    }
+
+    /// Only holder of AdminCap can withdraw
+    public fun withdraw(
+        _cap: &AdminCap,  // Proves caller has capability
+        vault: &mut Vault,
+        amount: u64,
+    ) {
+        vault.balance = vault.balance - amount;
+    }
+}
+```
+
+## Real Example: Flash Lender Admin
+
+From `examples/move/flash_lender`:
+
+```move
+module flash_lender::example {
+    use sui::balance::{Self, Balance};
+    use sui::coin::{Self, Coin};
+
+    public struct FlashLender<phantom T> has key {
+        id: UID,
+        to_lend: Balance<T>,
+        fee: u64,
+    }
+
+    /// Capability for admin operations
+    public struct AdminCap has key, store {
+        id: UID,
+        flash_lender_id: ID,
+    }
+
+    const EAdminOnly: u64 = 3;
+    const EWithdrawTooLarge: u64 = 4;
+
+    /// Create lender and return admin capability
+    public fun new<T>(
+        to_lend: Balance<T>,
+        fee: u64,
+        ctx: &mut TxContext
+    ): AdminCap {
+        let id = object::new(ctx);
+        let flash_lender_id = id.uid_to_inner();
+        let flash_lender = FlashLender { id, to_lend, fee };
+
+        transfer::share_object(flash_lender);
+
+        // Return admin capability to creator
+        AdminCap { id: object::new(ctx), flash_lender_id }
+    }
+
+    /// Only admin can withdraw
+    public fun withdraw<T>(
+        self: &mut FlashLender<T>,
+        admin: &AdminCap,
+        amount: u64,
+        ctx: &mut TxContext,
+    ): Coin<T> {
+        // Verify capability matches this lender
+        assert!(object::borrow_id(self) == &admin.flash_lender_id, EAdminOnly);
+        assert!(balance::value(&self.to_lend) >= amount, EWithdrawTooLarge);
+
+        coin::take(&mut self.to_lend, amount, ctx)
+    }
+
+    /// Only admin can update fee
+    public fun update_fee<T>(
+        self: &mut FlashLender<T>,
+        admin: &AdminCap,
+        new_fee: u64
+    ) {
+        assert!(object::borrow_id(self) == &admin.flash_lender_id, EAdminOnly);
+        self.fee = new_fee
+    }
+
+    /// Only admin can deposit
+    public fun deposit<T>(
+        self: &mut FlashLender<T>,
+        admin: &AdminCap,
+        coin: Coin<T>
+    ) {
+        assert!(object::borrow_id(self) == &admin.flash_lender_id, EAdminOnly);
+        coin::put(&mut self.to_lend, coin);
+    }
+}
+```
+
+## Game Admin Example
+
+From `examples/move/hero`:
+
+```move
+module hero::example {
+    use sui::balance::{Self, Balance};
+    use sui::sui::SUI;
+
+    public struct Game has key {
+        id: UID,
+        payments: Balance<SUI>,
+    }
+
+    /// Admin capability tied to specific game
+    public struct Admin has key, store {
+        id: UID,
+        game_id: ID,
+        boars_created: u64,
+        potions_created: u64,
+    }
+
+    const ENotAdmin: u64 = 3;
+
+    /// Create game and return admin capability
+    public fun new_game(ctx: &mut TxContext): Admin {
+        let game = Game {
+            id: object::new(ctx),
+            payments: balance::zero(),
+        };
+
+        let admin = Admin {
+            id: object::new(ctx),
+            game_id: object::id(&game),
+            boars_created: 0,
+            potions_created: 0,
+        };
+
+        transfer::share_object(game);
+        admin
+    }
+
+    /// Admin can create potions
+    public fun new_potion(
+        admin: &mut Admin,
+        potency: u64,
+        ctx: &mut TxContext
+    ): Potion {
+        admin.potions_created = admin.potions_created + 1;
+        Potion {
+            id: object::new(ctx),
+            potency,
+            game_id: admin.game_id,
+        }
+    }
+
+    /// Admin can take payments
+    public fun take_payment(
+        admin: &Admin,
+        game: &mut Game,
+        ctx: &mut TxContext
+    ): Coin<SUI> {
+        assert!(admin.game_id == object::id(game), ENotAdmin);
+        coin::from_balance(game.payments.withdraw_all(), ctx)
+    }
+}
+```
+
+## Capability Patterns
+
+### Pattern 1: Single Admin
+
+One capability for one resource:
+
+```move
+public struct Pool has key {
+    id: UID,
+    balance: u64,
+}
+
+public struct PoolAdminCap has key, store {
+    id: UID,
+    pool_id: ID,
+}
+
+fun init(ctx: &mut TxContext) {
+    let pool = Pool {
+        id: object::new(ctx),
+        balance: 0,
+    };
+    let pool_id = object::id(&pool);
+    transfer::share_object(pool);
+
+    let cap = PoolAdminCap {
+        id: object::new(ctx),
+        pool_id,
+    };
+    transfer::transfer(cap, ctx.sender());
+}
+```
+
+### Pattern 2: Multiple Capabilities
+
+Different capabilities for different permissions:
+
+```move
+/// Can mint tokens
+public struct MinterCap has key, store {
+    id: UID,
+}
+
+/// Can burn tokens
+public struct BurnerCap has key, store {
+    id: UID,
+}
+
+/// Can pause contract
+public struct PauserCap has key, store {
+    id: UID,
+}
+
+public fun mint(_cap: &MinterCap, amount: u64) {
+    // Mint logic
+}
+
+public fun burn(_cap: &BurnerCap, amount: u64) {
+    // Burn logic
+}
+
+public fun pause(_cap: &PauserCap) {
+    // Pause logic
+}
+```
+
+### Pattern 3: Transferable Capabilities
+
+Capabilities with `store` can be transferred:
+
+```move
+public struct TransferableCap has key, store {
+    id: UID,
+}
+
+public fun transfer_capability(
+    cap: TransferableCap,
+    new_admin: address,
+) {
+    transfer::transfer(cap, new_admin);
+}
+```
+
+### Pattern 4: Non-transferable Capabilities
+
+Without `store`, capabilities can't be transferred:
+
+```move
+/// Cannot be transferred or stored
+public struct SoulboundCap has key {
+    id: UID,
+}
+```
+
+### Pattern 5: Witness Pattern
+
+One-time-use capability for initialization:
+
+```move
+/// One-time witness (OTW)
+public struct MY_MODULE has drop {}
+
+fun init(otw: MY_MODULE, ctx: &mut TxContext) {
+    // otw can only be created once
+    // Use it to create publisher, display, etc.
+    let publisher = package::claim(otw, ctx);
+    transfer::public_transfer(publisher, ctx.sender());
+}
+```
+
+## Advanced Patterns
+
+### Tiered Capabilities
+
+```move
+public struct SuperAdminCap has key, store {
+    id: UID,
+}
+
+public struct AdminCap has key, store {
+    id: UID,
+}
+
+public struct ModeratorCap has key, store {
+    id: UID,
+}
+
+public fun super_admin_action(_cap: &SuperAdminCap) {
+    // Highest privileges
+}
+
+public fun admin_action(_cap: &AdminCap) {
+    // Medium privileges
+}
+
+public fun moderator_action(_cap: &ModeratorCap) {
+    // Basic privileges
+}
+```
+
+### Time-limited Capabilities
+
+```move
+public struct TimedCap has key, store {
+    id: UID,
+    expires_at: u64,
+}
+
+const ECapabilityExpired: u64 = 0;
+
+public fun use_capability(
+    cap: &TimedCap,
+    ctx: &TxContext
+) {
+    assert!(ctx.epoch_timestamp_ms() < cap.expires_at, ECapabilityExpired);
+    // Perform action
+}
+```
+
+### Revocable Capabilities
+
+```move
+public struct Registry has key {
+    id: UID,
+    valid_caps: VecSet<ID>,
+}
+
+public struct RevocableCap has key, store {
+    id: UID,
+    registry_id: ID,
+}
+
+public fun use_capability(
+    cap: &RevocableCap,
+    registry: &Registry,
+) {
+    assert!(
+        vec_set::contains(&registry.valid_caps, &object::id(cap)),
+        ECapabilityRevoked
+    );
+    // Perform action
+}
+
+public fun revoke(
+    registry: &mut Registry,
+    cap_id: ID,
+    _admin: &AdminCap,
+) {
+    vec_set::remove(&mut registry.valid_caps, &cap_id);
+}
+```
+
+## Capability Distribution
+
+### At Initialization
+
+```move
+fun init(ctx: &mut TxContext) {
+    let admin_cap = AdminCap { id: object::new(ctx) };
+    transfer::transfer(admin_cap, ctx.sender());
+}
+```
+
+### Via Function Call
+
+```move
+public fun create_minter(
+    _admin: &AdminCap,
+    recipient: address,
+    ctx: &mut TxContext
+) {
+    let minter = MinterCap { id: object::new(ctx) };
+    transfer::transfer(minter, recipient);
+}
+```
+
+### Via Purchase
+
+```move
+public fun buy_membership(
+    payment: Coin<SUI>,
+    ctx: &mut TxContext
+): MembershipCap {
+    assert!(payment.value() >= MEMBERSHIP_PRICE, EInsufficientPayment);
+    // Handle payment
+
+    MembershipCap { id: object::new(ctx) }
+}
+```
+
+## Testing Capabilities
+
+```move
+#[test]
+fun test_admin_only() {
+    let mut ctx = tx_context::dummy();
+
+    // Create vault and admin cap
+    let vault = Vault {
+        id: object::new(&mut ctx),
+        balance: 1000,
+    };
+
+    let admin_cap = AdminCap {
+        id: object::new(&mut ctx),
+    };
+
+    // Admin can withdraw
+    withdraw(&admin_cap, &mut vault, 100);
+    assert!(vault.balance == 900, 0);
+
+    // Cleanup
+    let Vault { id, balance: _ } = vault;
+    object::delete(id);
+    let AdminCap { id } = admin_cap;
+    object::delete(id);
+}
+
+#[test]
+#[expected_failure(abort_code = ENotAuthorized)]
+fun test_no_capability() {
+    // Try to call admin function without capability
+    // This should fail
+}
+```
+
+## Best Practices
+
+### 1. Bind capabilities to resources
+
+```move
+// Good: Capability tied to specific resource
+public struct AdminCap has key, store {
+    id: UID,
+    pool_id: ID,  // Which pool this controls
+}
+
+// Avoid: Generic capability
+public struct AdminCap has key, store {
+    id: UID,  // Controls what?
+}
+```
+
+### 2. Use appropriate abilities
+
+```move
+// Transferable admin
+public struct AdminCap has key, store { /* ... */ }
+
+// Non-transferable (soulbound)
+public struct ModeratorCap has key { /* ... */ }
+
+// One-time use
+public struct Witness has drop {}
+```
+
+### 3. Validate capabilities
+
+```move
+public fun admin_action(
+    pool: &mut Pool,
+    cap: &AdminCap,
+) {
+    // Always verify the capability matches
+    assert!(object::id(pool) == cap.pool_id, EInvalidCapability);
+    // Perform action
+}
+```
+
+### 4. Document capability usage
+
+```move
+/// Capability to mint new tokens.
+/// Created during initialization and transferred to treasury.
+/// Can be transferred to delegate minting authority.
+public struct MinterCap has key, store {
+    id: UID,
+}
+```
+
+### 5. Consider capability lifecycle
+
+```move
+/// Create a new minter capability
+public fun create_minter(
+    _admin: &AdminCap,
+    ctx: &mut TxContext
+): MinterCap { /* ... */ }
+
+/// Revoke a minter capability
+public fun revoke_minter(
+    cap: MinterCap,
+    _admin: &AdminCap,
+) {
+    let MinterCap { id } = cap;
+    object::delete(id);
+}
+```
+
+## Common Mistakes
+
+### ❌ Not binding capabilities
+
+```move
+// Bad: Any AdminCap can control any Pool
+public fun withdraw(_cap: &AdminCap, pool: &mut Pool) {
+    // ...
+}
+```
+
+### ✅ Binding capabilities
+
+```move
+// Good: AdminCap bound to specific Pool
+public fun withdraw(pool: &mut Pool, cap: &AdminCap) {
+    assert!(object::id(pool) == cap.pool_id, EInvalidCap);
+    // ...
+}
+```
+
+### ❌ Using address checks
+
+```move
+// Bad: Address-based access control
+public fun admin_action(pool: &mut Pool, ctx: &TxContext) {
+    assert!(ctx.sender() == pool.admin, ENotAdmin);
+    // ...
+}
+```
+
+### ✅ Using capabilities
+
+```move
+// Good: Capability-based access control
+public fun admin_action(pool: &mut Pool, _cap: &AdminCap) {
+    // Possession of AdminCap proves authorization
+    // ...
+}
+```
+
+## Next Steps
+
+- [Learn about package upgrades](/guides/upgrade-packages)
+- [Build programmable transactions](/guides/programmable-transactions)
+- [Explore the flash lender example](/guides/examples/defi)
+- Read about [Sui capabilities pattern](https://docs.sui.io/concepts/object-ownership/)

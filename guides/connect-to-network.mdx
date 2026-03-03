@@ -1,0 +1,357 @@
+---
+title: Connecting to Networks
+description: Connect your application to Sui networks
+---
+
+Sui supports multiple networks for different stages of development and production deployment.
+
+## Available Networks
+
+### Localnet
+
+**Purpose**: Local development and testing
+
+**RPC**: `http://127.0.0.1:9000`
+
+**Use case**: Fast iteration without network delays
+
+```bash
+# Start local network
+SUI_RUN_FULLNODE_MODE=1 sui start
+```
+
+### Devnet
+
+**Purpose**: Development and experimentation
+
+**RPC**: `https://fullnode.devnet.sui.io:443`
+
+**Use case**: Testing with a live network, frequent resets
+
+**Faucet**: Available for free test tokens
+
+### Testnet
+
+**Purpose**: Pre-production testing
+
+**RPC**: `https://fullnode.testnet.sui.io:443`
+
+**Use case**: Final testing before mainnet, more stable than devnet
+
+**Faucet**: Available for free test tokens
+
+### Mainnet
+
+**Purpose**: Production deployment
+
+**RPC**: `https://fullnode.mainnet.sui.io:443`
+
+**Use case**: Real value transactions
+
+**Faucet**: None (use real SUI)
+
+## Connecting with CLI
+
+### View active environment
+
+```bash
+sui client active-env
+```
+
+### List all environments
+
+```bash
+sui client envs
+```
+
+### Add new environment
+
+```bash
+sui client new-env --alias testnet --rpc https://fullnode.testnet.sui.io:443
+```
+
+### Switch environment
+
+```bash
+sui client switch --env testnet
+```
+
+## Connecting with Rust SDK
+
+From `crates/sui-sdk/examples/sui_client.rs`:
+
+```rust
+use sui_sdk::SuiClientBuilder;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    // Localnet
+    let local = SuiClientBuilder::default()
+        .build_localnet()
+        .await?;
+    
+    // Devnet
+    let devnet = SuiClientBuilder::default()
+        .build_devnet()
+        .await?;
+    
+    // Testnet
+    let testnet = SuiClientBuilder::default()
+        .build_testnet()
+        .await?;
+    
+    // Mainnet
+    let mainnet = SuiClientBuilder::default()
+        .build_mainnet()
+        .await?;
+
+    // Custom RPC
+    let custom = SuiClientBuilder::default()
+        .build("https://your-rpc.com")
+        .await?;
+
+    println!("Connected to testnet version: {}", testnet.api_version());
+    
+    Ok(())
+}
+```
+
+## Connecting with TypeScript SDK
+
+```typescript
+import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
+
+// Localnet
+const localClient = new SuiClient({
+  url: getFullnodeUrl('localnet'),
+});
+
+// Devnet
+const devnetClient = new SuiClient({
+  url: getFullnodeUrl('devnet'),
+});
+
+// Testnet
+const testnetClient = new SuiClient({
+  url: getFullnodeUrl('testnet'),
+});
+
+// Mainnet
+const mainnetClient = new SuiClient({
+  url: getFullnodeUrl('mainnet'),
+});
+
+// Custom RPC
+const customClient = new SuiClient({
+  url: 'https://your-custom-rpc.com',
+});
+```
+
+## Getting Test Tokens
+
+### Using CLI
+
+```bash
+# Ensure you're on testnet or devnet
+sui client switch --env testnet
+
+# Request tokens
+sui client faucet
+
+# Check balance
+sui client gas
+```
+
+### Using TypeScript
+
+```typescript
+import { requestSuiFromFaucetV0, getFaucetHost } from '@mysten/sui/faucet';
+
+const address = '0x...';
+
+// Request from testnet faucet
+await requestSuiFromFaucetV0({
+  host: getFaucetHost('testnet'),
+  recipient: address,
+});
+```
+
+### Using Rust
+
+From `crates/sui-sdk/examples/utils.rs`:
+
+```rust
+use sui_sdk::SuiClient;
+use sui_types::base_types::SuiAddress;
+
+pub async fn request_tokens_from_faucet(
+    address: SuiAddress,
+    sui_client: &SuiClient,
+) -> Result<(), anyhow::Error> {
+    let faucet_url = "https://faucet.testnet.sui.io/gas";
+    
+    let response = reqwest::Client::new()
+        .post(faucet_url)
+        .json(&serde_json::json!({
+            "FixedAmountRequest": {
+                "recipient": address.to_string()
+            }
+        }))
+        .send()
+        .await?;
+
+    if response.status().is_success() {
+        println!("Faucet request successful");
+    }
+
+    Ok(())
+}
+```
+
+## Network Configuration
+
+### Environment variables
+
+```bash
+export SUI_NETWORK=testnet
+export SUI_RPC_URL=https://fullnode.testnet.sui.io:443
+```
+
+### Configuration file
+
+Edit `~/.sui/sui_config/client.yaml`:
+
+```yaml
+keystore:
+  File: /home/user/.sui/sui_config/sui.keystore
+envs:
+  - alias: localnet
+    rpc: "http://127.0.0.1:9000"
+  - alias: devnet
+    rpc: "https://fullnode.devnet.sui.io:443"
+  - alias: testnet  
+    rpc: "https://fullnode.testnet.sui.io:443"
+  - alias: mainnet
+    rpc: "https://fullnode.mainnet.sui.io:443"
+active_env: testnet
+active_address: "0x..."
+```
+
+## Custom RPC Endpoints
+
+### Running your own node
+
+```bash
+# Clone Sui repository
+git clone https://github.com/MystenLabs/sui.git
+cd sui
+
+# Build and run fullnode
+cargo build --release --bin sui-node
+./target/release/sui-node --config-path fullnode.yaml
+```
+
+### Using third-party providers
+
+```typescript
+// Example with a custom provider
+const client = new SuiClient({
+  url: 'https://provider.example.com/sui/mainnet',
+});
+```
+
+## Health Checks
+
+### Check node status
+
+```bash
+curl https://fullnode.testnet.sui.io:443 -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"sui_getLatestCheckpointSequenceNumber"}'
+```
+
+### TypeScript health check
+
+```typescript
+async function checkNodeHealth(client: SuiClient): Promise<boolean> {
+  try {
+    const checkpoint = await client.getLatestCheckpointSequenceNumber();
+    console.log('Latest checkpoint:', checkpoint);
+    return true;
+  } catch (error) {
+    console.error('Node unhealthy:', error);
+    return false;
+  }
+}
+```
+
+### Rust health check
+
+```rust
+async fn check_connection(client: &SuiClient) -> Result<bool> {
+    match client.read_api().get_latest_checkpoint_sequence_number().await {
+        Ok(seq) => {
+            println!("Connected. Latest checkpoint: {}", seq);
+            Ok(true)
+        }
+        Err(e) => {
+            eprintln!("Connection failed: {}", e);
+            Ok(false)
+        }
+    }
+}
+```
+
+## Network Selection Strategy
+
+### Development workflow
+
+1. **Localnet**: Initial development and unit testing
+2. **Devnet**: Integration testing
+3. **Testnet**: Pre-production testing
+4. **Mainnet**: Production deployment
+
+### Best practices
+
+```typescript
+const network = process.env.NODE_ENV === 'production' 
+  ? 'mainnet' 
+  : 'testnet';
+
+const client = new SuiClient({
+  url: getFullnodeUrl(network),
+});
+```
+
+## Troubleshooting
+
+### Connection timeout
+
+```typescript
+const client = new SuiClient({
+  url: getFullnodeUrl('testnet'),
+  // Add timeout configuration if needed
+});
+```
+
+### Rate limiting
+
+Public RPC endpoints may have rate limits. Consider:
+- Using your own node
+- Implementing request caching
+- Adding retry logic with backoff
+
+### Network selection
+
+Always verify which network you're connected to:
+
+```bash
+sui client active-env
+sui client active-address
+```
+
+## Next Steps
+
+- [Query blockchain data](/guides/query-blockchain)
+- [Build transactions](/guides/build-transactions)
+- [Set up development environment](/guides/setup-dev-environment)

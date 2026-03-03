@@ -1,0 +1,195 @@
+---
+title: Indexing Blockchain Data
+description: Index and query Sui blockchain data efficiently
+---
+
+Efficiently index blockchain data for your application using various strategies.
+
+## Event-based Indexing
+
+### Listen for events
+
+```typescript
+import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
+
+const client = new SuiClient({ url: getFullnodeUrl('mainnet') });
+
+// Subscribe to events
+const unsubscribe = await client.subscribeEvent({
+  filter: {
+    MoveEventType: '0xPACKAGE::nft::NFTMinted',
+  },
+  onMessage: async (event) => {
+    console.log('New NFT minted:', event);
+    
+    // Store in database
+    await db.nfts.create({
+      id: event.parsedJson.object_id,
+      creator: event.parsedJson.creator,
+      name: event.parsedJson.name,
+      timestamp: event.timestampMs,
+    });
+  },
+});
+```
+
+### Query historical events
+
+```typescript
+let cursor = null;
+
+while (true) {
+  const events = await client.queryEvents({
+    query: {
+      MoveEventType: '0xPACKAGE::nft::NFTMinted',
+    },
+    cursor,
+    limit: 100,
+  });
+
+  // Process and store events
+  for (const event of events.data) {
+    await indexEvent(event);
+  }
+
+  if (!events.hasNextPage) break;
+  cursor = events.nextCursor;
+}
+```
+
+## Checkpoint-based Indexing
+
+```typescript
+async function indexCheckpoints(startCheckpoint: number) {
+  let current = startCheckpoint;
+
+  while (true) {
+    const checkpoint = await client.getCheckpoint({
+      id: current.toString(),
+    });
+
+    // Process transactions in checkpoint
+    for (const tx of checkpoint.transactions) {
+      await indexTransaction(tx);
+    }
+
+    current++;
+    
+    // Wait for new checkpoints
+    if (current > await client.getLatestCheckpointSequenceNumber()) {
+      await sleep(1000);
+    }
+  }
+}
+```
+
+## Using GraphQL
+
+Sui provides a GraphQL service for flexible queries:
+
+```graphql
+query GetNFTs($owner: SuiAddress!) {
+  objects(
+    filter: {
+      owner: $owner,
+      type: "0xPACKAGE::nft::NFT"
+    }
+  ) {
+    nodes {
+      address
+      version
+      contents {
+        json
+      }
+    }
+  }
+}
+```
+
+## Custom Indexer Architecture
+
+```typescript
+class SuiIndexer {
+  private client: SuiClient;
+  private db: Database;
+
+  async start() {
+    // Subscribe to events
+    await this.subscribeToEvents();
+    
+    // Backfill historical data
+    await this.backfillHistory();
+  }
+
+  private async subscribeToEvents() {
+    const eventTypes = [
+      '0xPACKAGE::nft::NFTMinted',
+      '0xPACKAGE::market::Listed',
+      '0xPACKAGE::market::Sold',
+    ];
+
+    for (const eventType of eventTypes) {
+      await this.client.subscribeEvent({
+        filter: { MoveEventType: eventType },
+        onMessage: (event) => this.handleEvent(event),
+      });
+    }
+  }
+
+  private async handleEvent(event: SuiEvent) {
+    // Parse and store event
+    await this.db.events.create({
+      type: event.type,
+      data: event.parsedJson,
+      timestamp: event.timestampMs,
+    });
+  }
+}
+```
+
+## Best Practices
+
+### 1. Handle reorganizations
+
+```typescript
+// Store checkpoint numbers for safe rollbacks
+await db.events.create({
+  data: event,
+  checkpoint: event.checkpoint,
+});
+```
+
+### 2. Use batch inserts
+
+```typescript
+const batch = [];
+for (const event of events) {
+  batch.push(event);
+  
+  if (batch.length >= 100) {
+    await db.events.insertMany(batch);
+    batch.length = 0;
+  }
+}
+```
+
+### 3. Implement retry logic
+
+```typescript
+async function withRetry(fn: () => Promise<any>, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (i === maxRetries - 1) throw error;
+      await sleep(1000 * Math.pow(2, i));
+    }
+  }
+}
+```
+
+## Next Steps
+
+- [Query blockchain data](/guides/query-blockchain)
+- [Work with events](/guides/events)
+- [Sui GraphQL](https://docs.sui.io/guides/developer/getting-started/graphql-rpc)

@@ -1,0 +1,547 @@
+---
+title: Using the TypeScript SDK
+description: Build Sui dApps with the official TypeScript SDK
+---
+
+The Sui TypeScript SDK (`@mysten/sui`) provides comprehensive tools for building web applications on Sui.
+
+<Note>
+The TypeScript SDK has moved to a [dedicated repository](https://github.com/MystenLabs/sui-typescript-sdk). Install the latest version from npm.
+</Note>
+
+## Installation
+
+Install the SDK and its peer dependencies:
+
+```bash
+npm install @mysten/sui
+```
+
+Or with yarn:
+
+```bash
+yarn add @mysten/sui
+```
+
+## Creating a Client
+
+Connect to different Sui networks:
+
+```typescript
+import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
+
+// Mainnet
+const mainnetClient = new SuiClient({
+  url: getFullnodeUrl('mainnet'),
+});
+
+// Testnet
+const testnetClient = new SuiClient({
+  url: getFullnodeUrl('testnet'),
+});
+
+// Devnet
+const devnetClient = new SuiClient({
+  url: getFullnodeUrl('devnet'),
+});
+
+// Localnet
+const localnetClient = new SuiClient({
+  url: getFullnodeUrl('localnet'),
+});
+
+// Custom RPC
+const customClient = new SuiClient({
+  url: 'https://your-custom-rpc.com',
+});
+```
+
+## Reading Data
+
+### Get owned objects
+
+```typescript
+import { SuiClient } from '@mysten/sui/client';
+
+const client = new SuiClient({ url: getFullnodeUrl('testnet') });
+const address = '0x...';
+
+// Get all owned objects
+const objects = await client.getOwnedObjects({
+  owner: address,
+  options: {
+    showType: true,
+    showContent: true,
+    showDisplay: true,
+  },
+});
+
+console.log('Owned objects:', objects.data);
+
+// Paginate through objects
+let hasMore = true;
+let cursor = null;
+
+while (hasMore) {
+  const response = await client.getOwnedObjects({
+    owner: address,
+    cursor,
+    limit: 50,
+  });
+
+  console.log('Objects:', response.data);
+  hasMore = response.hasNextPage;
+  cursor = response.nextCursor;
+}
+```
+
+### Get specific object
+
+```typescript
+const objectId = '0x...';
+
+const object = await client.getObject({
+  id: objectId,
+  options: {
+    showType: true,
+    showOwner: true,
+    showContent: true,
+    showDisplay: true,
+    showBcs: true,
+  },
+});
+
+console.log('Object:', object.data);
+```
+
+### Get coins and balances
+
+```typescript
+// Get all SUI coins
+const coins = await client.getCoins({
+  owner: address,
+  coinType: '0x2::sui::SUI',
+});
+
+console.log('SUI coins:', coins.data);
+
+// Get balance
+const balance = await client.getBalance({
+  owner: address,
+  coinType: '0x2::sui::SUI',
+});
+
+console.log('Balance:', balance.totalBalance);
+
+// Get all coin balances
+const allBalances = await client.getAllBalances({
+  owner: address,
+});
+
+allBalances.forEach((bal) => {
+  console.log(`${bal.coinType}: ${bal.totalBalance}`);
+});
+```
+
+## Working with Keypairs
+
+### Generate new keypair
+
+```typescript
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
+import { Secp256k1Keypair } from '@mysten/sui/keypairs/secp256k1';
+import { Secp256r1Keypair } from '@mysten/sui/keypairs/secp256r1';
+
+// Ed25519 (recommended)
+const ed25519Keypair = new Ed25519Keypair();
+
+// Secp256k1
+const secp256k1Keypair = new Secp256k1Keypair();
+
+// Secp256r1  
+const secp256r1Keypair = new Secp256r1Keypair();
+
+// Get address
+const address = ed25519Keypair.getPublicKey().toSuiAddress();
+console.log('Address:', address);
+```
+
+### Import from private key
+
+```typescript
+import { fromSecretKey } from '@mysten/sui/keypairs/ed25519';
+import { decodeSuiPrivateKey } from '@mysten/sui/cryptography';
+
+// From Sui private key (starts with 'suiprivkey')
+const keypair = decodeSuiPrivateKey('suiprivkey1...');
+
+// From raw bytes
+const secretKey = new Uint8Array([/* ... */]);
+const keypairFromBytes = fromSecretKey(secretKey);
+```
+
+### Export private key
+
+```typescript
+const privateKey = keypair.getSecretKey();
+const exportedKey = keypair.export();
+console.log('Private key:', exportedKey.privateKey);
+```
+
+## Building Transactions
+
+### Simple transfer
+
+```typescript
+import { Transaction } from '@mysten/sui/transactions';
+
+const tx = new Transaction();
+
+// Transfer SUI
+tx.transferObjects(
+  [tx.splitCoins(tx.gas, [1000000])], // 1000000 MIST = 0.001 SUI
+  '0x...recipient...'
+);
+
+// Set sender and gas budget
+tx.setSender(address);
+tx.setGasBudget(10000000);
+```
+
+### Complex transaction
+
+```typescript
+const tx = new Transaction();
+
+// Split a coin
+const [coin] = tx.splitCoins(tx.gas, [1000000]);
+
+// Call a Move function
+tx.moveCall({
+  target: '0xPACKAGE::module::function',
+  arguments: [
+    tx.pure.u64(42),
+    tx.pure.address('0x...'),
+    tx.object('0xOBJECT_ID'),
+  ],
+  typeArguments: ['0x2::sui::SUI'],
+});
+
+// Transfer result
+tx.transferObjects([coin], recipient);
+```
+
+### Calling Move functions
+
+```typescript
+const tx = new Transaction();
+
+// Call function with arguments
+tx.moveCall({
+  target: '${packageId}::nft::mint',
+  arguments: [
+    tx.pure.string('NFT Name'),
+    tx.pure.string('Description'),
+    tx.pure.string('https://image.url'),
+  ],
+});
+
+// Call with type parameters
+tx.moveCall({
+  target: '${packageId}::token::transfer',
+  arguments: [
+    tx.object(tokenId),
+    tx.pure.address(recipient),
+  ],
+  typeArguments: ['0x2::sui::SUI'],
+});
+```
+
+## Signing and Executing
+
+### Sign and execute transaction
+
+```typescript
+import { Transaction } from '@mysten/sui/transactions';
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
+
+const keypair = new Ed25519Keypair();
+const client = new SuiClient({ url: getFullnodeUrl('testnet') });
+
+const tx = new Transaction();
+tx.transferObjects(
+  [tx.splitCoins(tx.gas, [1000000])],
+  recipient
+);
+tx.setSender(keypair.getPublicKey().toSuiAddress());
+
+// Sign and execute
+const result = await client.signAndExecuteTransaction({
+  transaction: tx,
+  signer: keypair,
+  options: {
+    showEffects: true,
+    showObjectChanges: true,
+    showEvents: true,
+  },
+});
+
+console.log('Transaction digest:', result.digest);
+console.log('Effects:', result.effects);
+console.log('Events:', result.events);
+```
+
+### Dry run transaction
+
+Test transaction without executing:
+
+```typescript
+const dryRunResult = await client.dryRunTransactionBlock({
+  transactionBlock: await tx.build({ client }),
+});
+
+console.log('Estimated gas:', dryRunResult.effects.gasUsed);
+console.log('Status:', dryRunResult.effects.status);
+```
+
+## Querying Events
+
+```typescript
+// Query events by transaction
+const events = await client.queryEvents({
+  query: { Transaction: transactionDigest },
+});
+
+console.log('Events:', events.data);
+
+// Query by Move event type
+const nftEvents = await client.queryEvents({
+  query: {
+    MoveEventType: '0xPACKAGE::nft::NFTMinted',
+  },
+  limit: 50,
+});
+
+// Query by sender
+const senderEvents = await client.queryEvents({
+  query: { Sender: address },
+  limit: 100,
+});
+
+// Paginate through events
+let cursor = null;
+while (true) {
+  const response = await client.queryEvents({
+    query: { MoveEventType: '0xPACKAGE::nft::NFTMinted' },
+    cursor,
+    limit: 50,
+  });
+
+  console.log('Events:', response.data);
+
+  if (!response.hasNextPage) break;
+  cursor = response.nextCursor;
+}
+```
+
+## Subscribing to Events
+
+```typescript
+const unsubscribe = await client.subscribeEvent({
+  filter: {
+    MoveEventType: '0xPACKAGE::nft::NFTMinted',
+  },
+  onMessage: (event) => {
+    console.log('New event:', event);
+  },
+});
+
+// Unsubscribe when done
+// unsubscribe();
+```
+
+## Transaction Utilities
+
+### Get transaction details
+
+```typescript
+const txDetails = await client.getTransactionBlock({
+  digest: transactionDigest,
+  options: {
+    showInput: true,
+    showEffects: true,
+    showEvents: true,
+    showObjectChanges: true,
+    showBalanceChanges: true,
+  },
+});
+
+console.log('Transaction:', txDetails);
+```
+
+### Multi-get transactions
+
+```typescript
+const transactions = await client.multiGetTransactionBlocks({
+  digests: [digest1, digest2, digest3],
+  options: {
+    showEffects: true,
+  },
+});
+```
+
+## Working with Display
+
+```typescript
+// Get object display
+const objectData = await client.getObject({
+  id: objectId,
+  options: {
+    showDisplay: true,
+  },
+});
+
+if (objectData.data?.display?.data) {
+  const display = objectData.data.display.data;
+  console.log('Name:', display.name);
+  console.log('Image:', display.image_url);
+  console.log('Description:', display.description);
+}
+```
+
+## Error Handling
+
+```typescript
+import { SuiClient } from '@mysten/sui/client';
+
+async function safeTransfer(
+  client: SuiClient,
+  keypair: Ed25519Keypair,
+  recipient: string,
+  amount: number
+) {
+  try {
+    const tx = new Transaction();
+    tx.transferObjects(
+      [tx.splitCoins(tx.gas, [amount])],
+      recipient
+    );
+    tx.setSender(keypair.getPublicKey().toSuiAddress());
+
+    const result = await client.signAndExecuteTransaction({
+      transaction: tx,
+      signer: keypair,
+    });
+
+    if (result.effects?.status?.status !== 'success') {
+      throw new Error(`Transaction failed: ${result.effects?.status?.error}`);
+    }
+
+    return result.digest;
+  } catch (error) {
+    console.error('Transfer failed:', error);
+    throw error;
+  }
+}
+```
+
+## Best Practices
+
+### 1. Reuse client instances
+
+```typescript
+// Good: Create once, use everywhere
+const client = new SuiClient({ url: getFullnodeUrl('testnet') });
+
+export function getClient() {
+  return client;
+}
+```
+
+### 2. Handle transaction failures
+
+```typescript
+const result = await client.signAndExecuteTransaction({
+  transaction: tx,
+  signer: keypair,
+});
+
+if (result.effects?.status?.status === 'success') {
+  console.log('Success!');
+} else {
+  console.error('Failed:', result.effects?.status?.error);
+}
+```
+
+### 3. Use TypeScript types
+
+```typescript
+import { SuiClient } from '@mysten/sui/client';
+import { Transaction } from '@mysten/sui/transactions';
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
+
+interface TransferParams {
+  client: SuiClient;
+  signer: Ed25519Keypair;
+  recipient: string;
+  amount: bigint;
+}
+
+async function transfer(params: TransferParams) {
+  // Type-safe implementation
+}
+```
+
+### 4. Cache expensive queries
+
+```typescript
+const cache = new Map<string, any>();
+
+async function getCachedObject(objectId: string) {
+  if (cache.has(objectId)) {
+    return cache.get(objectId);
+  }
+
+  const object = await client.getObject({ id: objectId });
+  cache.set(objectId, object);
+  return object;
+}
+```
+
+## Integration with React
+
+```typescript
+import { useState, useEffect } from 'react';
+import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
+
+function useBalance(address: string) {
+  const [balance, setBalance] = useState<string>('0');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const client = new SuiClient({ url: getFullnodeUrl('testnet') });
+
+    async function fetchBalance() {
+      try {
+        const result = await client.getBalance({ owner: address });
+        setBalance(result.totalBalance);
+      } catch (error) {
+        console.error('Failed to fetch balance:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchBalance();
+  }, [address]);
+
+  return { balance, loading };
+}
+```
+
+## Next Steps
+
+- [Build transactions](/guides/build-transactions)
+- [Query blockchain data](/guides/query-blockchain)
+- [Work with programmable transactions](/guides/programmable-transactions)
+- Explore [@mysten/dapp-kit](https://sdk.mystenlabs.com/dapp-kit) for React components

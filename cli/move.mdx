@@ -1,0 +1,541 @@
+---
+title: sui move
+description: Tool to build and test Move applications for Sui
+---
+
+The `sui move` command provides tools for developing Move smart contracts on Sui.
+
+## Synopsis
+
+```bash
+sui move [OPTIONS] <COMMAND>
+```
+
+## Global Options
+
+<ParamField path="-p, --path" type="path">
+  Path to a package which the command should be run with respect to
+</ParamField>
+
+<ParamField path="--client.config" type="path">
+  Path to client configuration file
+</ParamField>
+
+<ParamField path="--client.env" type="string">
+  The Sui environment to use
+</ParamField>
+
+## Build Configuration Options
+
+These options are available for most commands:
+
+<ParamField path="--environment" type="string">
+  Build environment for the package
+</ParamField>
+
+<ParamField path="--mode" type="string">
+  Build mode(s) to use
+</ParamField>
+
+<ParamField path="--dev" type="boolean">
+  Enable dev mode
+</ParamField>
+
+<ParamField path="--test" type="boolean">
+  Enable test mode
+</ParamField>
+
+## Commands
+
+### build
+
+Build a Move package.
+
+```bash
+sui move build [OPTIONS]
+```
+
+<ParamField path="--dump-bytecode-as-base64" type="boolean">
+  Dump package bytecode as Base64
+</ParamField>
+
+<ParamField path="--with-unpublished-dependencies" type="boolean">
+  Build with unpublished dependencies (addresses set to 0x0)
+</ParamField>
+
+<ParamField path="--no-tree-shaking" type="boolean">
+  Skip tree shaking optimization
+</ParamField>
+
+**Example:**
+```bash
+# Build package in current directory
+sui move build
+
+# Build package at specific path
+sui move build --path ./my_package
+
+# Build with bytecode output
+sui move build --dump-bytecode-as-base64
+```
+
+**Output:**
+Successful builds display:
+- Build summary
+- Module compilation status
+- Package digest
+- Build artifacts location
+
+### test
+
+Run Move unit tests.
+
+```bash
+sui move test [OPTIONS] [FILTER]
+```
+
+<ParamField path="FILTER" type="string">
+  Optional filter string to run specific tests matching the pattern
+</ParamField>
+
+<ParamField path="--coverage" type="boolean">
+  Enable coverage collection during tests
+</ParamField>
+
+<ParamField path="--gas-limit" type="u64">
+  Gas limit for running tests (default: 1000000000)
+</ParamField>
+
+<ParamField path="--list" type="boolean">
+  List all tests without running them
+</ParamField>
+
+**Example:**
+```bash
+# Run all tests
+sui move test
+
+# Run tests matching a pattern
+sui move test test_transfer
+
+# Run tests with coverage
+sui move test --coverage
+
+# List all available tests
+sui move test --list
+```
+
+**Test Output:**
+```
+RUNNING MoveUnit tests
+[ PASS    ] 0x0::my_module::test_create
+[ PASS    ] 0x0::my_module::test_transfer
+[ PASS    ] 0x0::my_module::test_burn
+Test result: OK. Total tests: 3; passed: 3; failed: 0
+```
+
+### coverage
+
+Generate coverage report for Move tests.
+
+```bash
+sui move coverage [OPTIONS]
+```
+
+<ParamField path="--format" type="string">
+  Output format: `text`, `html`, `lcov`, or `summary` (default: `summary`)
+</ParamField>
+
+<ParamField path="--output" type="path">
+  Output file or directory for coverage data
+</ParamField>
+
+**Prerequisites:**
+Must run `sui move test --coverage` first to generate coverage data.
+
+**Example:**
+```bash
+# Generate coverage data
+sui move test --coverage
+
+# View coverage summary
+sui move coverage
+
+# Generate HTML coverage report
+sui move coverage --format html --output coverage_report
+
+# Generate LCOV format for CI tools
+sui move coverage --format lcov --output coverage.lcov
+```
+
+### disassemble
+
+Disassemble Move bytecode.
+
+```bash
+sui move disassemble [OPTIONS]
+```
+
+Disassembles compiled Move modules to readable bytecode.
+
+**Example:**
+```bash
+sui move disassemble --path ./my_package
+```
+
+### migrate
+
+Migrate a Move package to the latest syntax and format.
+
+```bash
+sui move migrate [OPTIONS]
+```
+
+Updates Move source code to match current language version.
+
+**Example:**
+```bash
+sui move migrate
+sui move migrate --path ./legacy_package
+```
+
+### new
+
+Create a new Move package.
+
+```bash
+sui move new <NAME>
+```
+
+<ParamField path="NAME" type="string" required>
+  Name of the new package
+</ParamField>
+
+**Example:**
+```bash
+sui move new my_package
+```
+
+Creates a new directory with:
+```
+my_package/
+├── Move.toml
+├── sources/
+│   └── my_package.move
+└── tests/
+    └── my_package_tests.move
+```
+
+**Generated Move.toml:**
+```toml
+[package]
+name = "my_package"
+version = "0.0.1"
+
+[dependencies]
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "framework/mainnet" }
+
+[addresses]
+my_package = "0x0"
+```
+
+### summary
+
+Generate a package summary.
+
+```bash
+sui move summary [OPTIONS]
+```
+
+<ParamField path="--package-id" type="ObjectID">
+  Generate summary for an on-chain package
+</ParamField>
+
+<ParamField path="--bytecode" type="boolean">
+  Generate bytecode-based summary
+</ParamField>
+
+**Example:**
+```bash
+# Summary of local package
+sui move summary
+
+# Summary of on-chain package
+sui move summary --package-id 0xPACKAGE_ID --bytecode
+```
+
+### update-deps
+
+Update Move package dependencies.
+
+```bash
+sui move update-deps [OPTIONS]
+```
+
+Updates dependencies defined in `Move.toml` to their latest compatible versions.
+
+**Example:**
+```bash
+sui move update-deps
+```
+
+## Package Structure
+
+A typical Sui Move package structure:
+
+```
+my_package/
+├── Move.toml           # Package manifest
+├── Move.lock           # Dependency lock file (auto-generated)
+├── sources/            # Source code directory
+│   ├── module1.move
+│   └── module2.move
+├── tests/              # Unit tests
+│   └── tests.move
+├── scripts/            # Transaction scripts (optional)
+│   └── script.move
+└── build/              # Build output (auto-generated)
+    └── ...
+```
+
+## Move.toml Configuration
+
+The `Move.toml` file configures your package:
+
+```toml
+[package]
+name = "my_package"        # Package name
+version = "1.0.0"          # Package version
+
+[dependencies]
+# Sui framework dependency
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "framework/mainnet" }
+
+# Local dependency
+MyLibrary = { local = "../my_library" }
+
+# Git dependency
+DeepBook = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/deepbook", rev = "main" }
+
+[addresses]
+my_package = "0x0"         # Address for unpublished package
+std = "0x1"               # Standard library
+sui = "0x2"               # Sui framework
+
+[dev-dependencies]
+# Dependencies only for tests
+```
+
+## Writing Tests
+
+Move unit tests use the `#[test]` attribute:
+
+```move
+module my_package::my_module {
+    use sui::test_scenario;
+
+    #[test]
+    fun test_create() {
+        let sender = @0xA;
+        let mut scenario = test_scenario::begin(sender);
+        
+        // Test logic here
+        
+        test_scenario::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 0)]
+    fun test_failure() {
+        // Test that should fail
+        abort 0
+    }
+}
+```
+
+### Test Attributes
+
+<ParamField path="#[test]" type="attribute">
+  Marks a function as a test
+</ParamField>
+
+<ParamField path="#[test_only]" type="attribute">
+  Marks code that is only compiled in test mode
+</ParamField>
+
+<ParamField path="#[expected_failure]" type="attribute">
+  Marks a test that is expected to fail
+</ParamField>
+
+<ParamField path="abort_code = N" type="parameter">
+  Expected abort code for `#[expected_failure]`
+</ParamField>
+
+## Build Modes
+
+Sui Move supports different build modes:
+
+- **Default**: Standard build for deployment
+- **Test**: Includes test code and test-only dependencies
+- **Dev**: Development mode with additional checks
+
+## Common Workflows
+
+### Creating a New Package
+
+```bash
+# Create package
+sui move new my_nft
+cd my_nft
+
+# Build
+sui move build
+
+# Test
+sui move test
+
+# Publish
+sui client publish --gas-budget 100000000
+```
+
+### Development Cycle
+
+```bash
+# Make changes to code
+vim sources/my_module.move
+
+# Build and test
+sui move build && sui move test
+
+# If tests pass, publish
+sui client publish --gas-budget 100000000
+```
+
+### Working with Dependencies
+
+```bash
+# Update dependencies
+sui move update-deps
+
+# Build with updated dependencies
+sui move build
+
+# Test with new dependencies
+sui move test
+```
+
+## Examples
+
+### Simple Counter Module
+
+```move
+module my_package::counter {
+    use sui::object::{Self, UID};
+    use sui::tx_context::{Self, TxContext};
+    use sui::transfer;
+
+    public struct Counter has key {
+        id: UID,
+        value: u64,
+    }
+
+    public fun create(ctx: &mut TxContext) {
+        let counter = Counter {
+            id: object::new(ctx),
+            value: 0,
+        };
+        transfer::share_object(counter);
+    }
+
+    public fun increment(counter: &mut Counter) {
+        counter.value = counter.value + 1;
+    }
+
+    public fun value(counter: &Counter): u64 {
+        counter.value
+    }
+
+    #[test]
+    fun test_counter() {
+        use sui::test_scenario;
+
+        let user = @0xA;
+        let mut scenario = test_scenario::begin(user);
+        
+        // Create counter
+        {
+            let ctx = test_scenario::ctx(&mut scenario);
+            create(ctx);
+        };
+        
+        // Increment counter
+        test_scenario::next_tx(&mut scenario, user);
+        {
+            let mut counter = test_scenario::take_shared<Counter>(&scenario);
+            increment(&mut counter);
+            assert!(value(&counter) == 1, 0);
+            test_scenario::return_shared(counter);
+        };
+        
+        test_scenario::end(scenario);
+    }
+}
+```
+
+### Running the Example
+
+```bash
+# Create and build
+sui move new counter_package
+cd counter_package
+# Add the counter module code above to sources/counter.move
+
+# Build
+sui move build
+
+# Test
+sui move test
+
+# Publish
+sui client publish --gas-budget 100000000
+```
+
+## Troubleshooting
+
+### Build Errors
+
+**Module not found:**
+```bash
+# Ensure dependencies are specified in Move.toml
+# Run update-deps
+sui move update-deps
+```
+
+**Address resolution failed:**
+```bash
+# Check [addresses] section in Move.toml
+# Ensure all referenced addresses are defined
+```
+
+### Test Failures
+
+```bash
+# Run with verbose output
+RUST_LOG=debug sui move test
+
+# Run specific test
+sui move test my_test_name
+```
+
+### Dependency Issues
+
+```bash
+# Clean build artifacts
+rm -rf build
+
+# Update dependencies
+sui move update-deps
+
+# Rebuild
+sui move build
+```

@@ -1,0 +1,325 @@
+---
+title: ReadApi
+description: Query objects, transactions, checkpoints, and network state
+---
+
+The ReadApi provides read-only access to Sui network data. All methods are in the `sui` namespace.
+
+## Methods
+
+### getTransactionBlock
+
+Returns transaction details by digest.
+
+<ParamField path="digest" type="TransactionDigest" required>
+  The digest of the queried transaction
+</ParamField>
+
+<ParamField path="options" type="SuiTransactionBlockResponseOptions">
+  Options for specifying the content to be returned
+  
+  <Expandable title="options fields">
+    <ParamField path="showInput" type="boolean">Show transaction input data</ParamField>
+    <ParamField path="showEffects" type="boolean">Show transaction effects</ParamField>
+    <ParamField path="showEvents" type="boolean">Show emitted events</ParamField>
+    <ParamField path="showObjectChanges" type="boolean">Show object changes</ParamField>
+    <ParamField path="showBalanceChanges" type="boolean">Show balance changes</ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="result" type="SuiTransactionBlockResponse">
+  The transaction response object
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "sui_getTransactionBlock",
+    "params": [
+      "7nPJKfZTx2YWqZWW3A8cXnFQVFQs7FKqBZqXU6qz5K4Q",
+      {
+        "showInput": true,
+        "showEffects": true,
+        "showEvents": true
+      }
+    ]
+  }'
+```
+
+---
+
+### multiGetTransactionBlocks
+
+Returns an ordered list of transaction responses. Throws an error if input contains duplicates or exceeds `QUERY_MAX_RESULT_LIMIT`.
+
+<ParamField path="digests" type="TransactionDigest[]" required>
+  A list of transaction digests
+</ParamField>
+
+<ParamField path="options" type="SuiTransactionBlockResponseOptions">
+  Config options to control which fields to fetch
+</ParamField>
+
+<ResponseField name="result" type="SuiTransactionBlockResponse[]">
+  Array of transaction response objects
+</ResponseField>
+
+---
+
+### getObject
+
+Returns object information for a specified object.
+
+<ParamField path="object_id" type="ObjectID" required>
+  The ID of the queried object
+</ParamField>
+
+<ParamField path="options" type="SuiObjectDataOptions">
+  Options for specifying the content to be returned
+  
+  <Expandable title="options fields">
+    <ParamField path="showType" type="boolean">Show object type</ParamField>
+    <ParamField path="showOwner" type="boolean">Show object owner</ParamField>
+    <ParamField path="showPreviousTransaction" type="boolean">Show previous transaction digest</ParamField>
+    <ParamField path="showContent" type="boolean">Show parsed object content</ParamField>
+    <ParamField path="showBcs" type="boolean">Show BCS-encoded bytes</ParamField>
+    <ParamField path="showDisplay" type="boolean">Show display metadata</ParamField>
+    <ParamField path="showStorageRebate" type="boolean">Show storage rebate</ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="result" type="SuiObjectResponse">
+  The object information
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "sui_getObject",
+    "params": [
+      "0x5",
+      {
+        "showType": true,
+        "showOwner": true,
+        "showContent": true
+      }
+    ]
+  }'
+```
+
+---
+
+### multiGetObjects
+
+Returns object data for a list of objects.
+
+<ParamField path="object_ids" type="ObjectID[]" required>
+  The IDs of the queried objects
+</ParamField>
+
+<ParamField path="options" type="SuiObjectDataOptions">
+  Options for specifying the content to be returned
+</ParamField>
+
+<ResponseField name="result" type="SuiObjectResponse[]">
+  Array of object responses
+</ResponseField>
+
+---
+
+### tryGetPastObject
+
+Returns object information for a specified version. No software-level guarantee that past objects can be retrieved.
+
+<ParamField path="object_id" type="ObjectID" required>
+  The ID of the queried object
+</ParamField>
+
+<ParamField path="version" type="SequenceNumber" required>
+  The version of the queried object
+</ParamField>
+
+<ParamField path="options" type="SuiObjectDataOptions">
+  Options for specifying the content to be returned
+</ParamField>
+
+<ResponseField name="result" type="SuiPastObjectResponse">
+  The past object information
+</ResponseField>
+
+---
+
+### tryMultiGetPastObjects
+
+Returns object information for a list of past objects.
+
+<ParamField path="past_objects" type="SuiGetPastObjectRequest[]" required>
+  A vector of object and versions to be queried
+</ParamField>
+
+<ParamField path="options" type="SuiObjectDataOptions">
+  Options for specifying the content to be returned
+</ParamField>
+
+<ResponseField name="result" type="SuiPastObjectResponse[]">
+  Array of past object responses
+</ResponseField>
+
+---
+
+### getCheckpoint
+
+Returns a checkpoint by sequence number or digest.
+
+<ParamField path="id" type="CheckpointId" required>
+  Checkpoint identifier (digest or sequence number)
+</ParamField>
+
+<ResponseField name="result" type="Checkpoint">
+  The checkpoint data
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "sui_getCheckpoint",
+    "params": ["1000000"]
+  }'
+```
+
+---
+
+### getCheckpoints
+
+Returns a paginated list of checkpoints.
+
+<ParamField path="cursor" type="BigInt<u64>">
+  Optional paging cursor. If provided, query starts from the next item after the cursor
+</ParamField>
+
+<ParamField path="limit" type="usize">
+  Maximum items returned per page
+</ParamField>
+
+<ParamField path="descending_order" type="boolean" required>
+  Query result ordering (false = ascending, oldest first)
+</ParamField>
+
+<ResponseField name="result" type="CheckpointPage">
+  Paginated checkpoint results
+</ResponseField>
+
+---
+
+### getEvents
+
+Returns transaction events by transaction digest.
+
+<ParamField path="transaction_digest" type="TransactionDigest" required>
+  The event query criteria
+</ParamField>
+
+<ResponseField name="result" type="SuiEvent[]">
+  Array of events emitted by the transaction
+</ResponseField>
+
+---
+
+### getTotalTransactionBlocks
+
+Returns the total number of transaction blocks known to the server.
+
+<ResponseField name="result" type="BigInt<u64>">
+  Total transaction count
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "sui_getTotalTransactionBlocks",
+    "params": []
+  }'
+```
+
+---
+
+### getLatestCheckpointSequenceNumber
+
+Returns the sequence number of the latest checkpoint that has been executed.
+
+<ResponseField name="result" type="BigInt<u64>">
+  Latest checkpoint sequence number
+</ResponseField>
+
+---
+
+### getProtocolConfig
+
+Returns the protocol config table for the given version number. If no version is specified, returns the latest protocol config.
+
+<ParamField path="version" type="BigInt<u64>">
+  Optional protocol version specifier
+</ParamField>
+
+<ResponseField name="result" type="ProtocolConfigResponse">
+  Protocol configuration parameters
+</ResponseField>
+
+---
+
+### getChainIdentifier
+
+Returns the first four bytes of the chain's genesis checkpoint digest.
+
+<ResponseField name="result" type="string">
+  Chain identifier string
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "sui_getChainIdentifier",
+    "params": []
+  }'
+```
+
+---
+
+### verifyZkLoginSignature
+
+Verifies a zkLogin signature for the given bytes, intent scope, and author.
+
+<ParamField path="bytes" type="string" required>
+  Base64 string of BCS bytes for raw transaction data or personal message
+</ParamField>
+
+<ParamField path="signature" type="string" required>
+  Base64 string of the zkLogin signature to verify
+</ParamField>
+
+<ParamField path="intent_scope" type="ZkLoginIntentScope" required>
+  Intent scope: either `TransactionData` or `PersonalMessage`
+</ParamField>
+
+<ParamField path="author" type="SuiAddress" required>
+  The author of the signature
+</ParamField>
+
+<ResponseField name="result" type="ZkLoginVerifyResult">
+  Verification result
+</ResponseField>

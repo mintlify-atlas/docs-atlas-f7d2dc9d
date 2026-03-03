@@ -1,0 +1,399 @@
+---
+title: Gaming Example - Hero Game
+description: Build an on-chain game with heroes, items, and battles
+---
+
+This example demonstrates a complete on-chain game with characters, items, inventory, and gameplay mechanics.
+
+## Game Architecture
+
+From `examples/move/hero/sources/example.move`:
+
+```move
+module hero::example {
+    use sui::balance::{Self, Balance};
+    use sui::coin::{Self, Coin};
+    use sui::event;
+    use sui::sui::SUI;
+
+    /// Player character
+    public struct Hero has key, store {
+        id: UID,
+        game_id: ID,
+        health: u64,
+        experience: u64,
+        sword: Option<Sword>,
+    }
+
+    /// Weapon
+    public struct Sword has key, store {
+        id: UID,
+        game_id: ID,
+        magic: u64,
+        strength: u64,
+    }
+
+    /// Consumable item
+    public struct Potion has key, store {
+        id: UID,
+        game_id: ID,
+        potency: u64,
+    }
+
+    /// Enemy
+    public struct Boar has key, store {
+        id: UID,
+        game_id: ID,
+        health: u64,
+        strength: u64,
+    }
+
+    /// Game state
+    public struct Game has key {
+        id: UID,
+        payments: Balance<SUI>,
+    }
+
+    /// Admin capability
+    public struct Admin has key, store {
+        id: UID,
+        game_id: ID,
+        boars_created: u64,
+        potions_created: u64,
+    }
+
+    const MAX_HP: u64 = 1000;
+    const MAX_MAGIC: u64 = 10;
+    const MIN_SWORD_COST: u64 = 100;
+}
+```
+
+## Game Mechanics
+
+### Creating a Hero
+
+```move
+/// Buy sword and create hero
+public fun new_sword(
+    game: &mut Game,
+    payment: Coin<SUI>,
+    ctx: &mut TxContext
+): Sword {
+    let value = payment.value();
+    assert!(value >= MIN_SWORD_COST, EInsufficientFunds);
+
+    coin::put(&mut game.payments, payment);
+
+    // Magic based on payment amount
+    let magic = (value - MIN_SWORD_COST) / MIN_SWORD_COST;
+    Sword {
+        id: object::new(ctx),
+        magic: magic.min(MAX_MAGIC),
+        strength: 1,
+        game_id: object::id(game),
+    }
+}
+
+public fun new_hero(sword: Sword, ctx: &mut TxContext): Hero {
+    Hero {
+        id: object::new(ctx),
+        game_id: sword.game_id,
+        health: 100,
+        experience: 0,
+        sword: option::some(sword),
+    }
+}
+```
+
+### Battle System
+
+```move
+public struct BoarSlainEvent has copy, drop {
+    slayer_address: address,
+    boar: ID,
+    hero: ID,
+    game_id: ID,
+}
+
+public fun slay(hero: &mut Hero, boar: Boar, ctx: &TxContext) {
+    assert!(hero.game_id == boar.game_id, EWrongGame);
+
+    let Boar {
+        id: boar_id,
+        strength: boar_strength,
+        health: mut boar_health,
+        game_id: _,
+    } = boar;
+
+    let experience = boar_health;
+
+    // Battle loop
+    loop {
+        let hero_strength = hero.hero_strength();
+
+        // Hero attacks
+        if (boar_health < hero_strength) {
+            break
+        } else {
+            boar_health = boar_health - hero_strength;
+        };
+
+        // Boar counter-attacks
+        assert!(hero.health >= boar_strength, EBoarWon);
+        hero.health = hero.health - boar_strength;
+    };
+
+    // Victory! Level up hero
+    hero.experience = hero.experience + experience;
+    if (hero.sword.is_some()) {
+        hero.sword.borrow_mut().level_up_sword(1)
+    };
+
+    // Emit event
+    event::emit(BoarSlainEvent {
+        slayer_address: ctx.sender(),
+        hero: object::id(hero),
+        boar: boar_id.uid_to_inner(),
+        game_id: hero.game_id,
+    });
+
+    boar_id.delete();
+}
+
+public fun hero_strength(hero: &Hero): u64 {
+    assert!(hero.health > 0, EHeroTired);
+
+    let sword_strength = if (hero.sword.is_some()) {
+        hero.sword.borrow().sword_strength()
+    } else {
+        0
+    };
+
+    (hero.experience * hero.health) + sword_strength
+}
+```
+
+### Inventory System
+
+```move
+/// Heal with potion
+public fun heal(hero: &mut Hero, potion: Potion) {
+    let Potion { id, potency, game_id } = potion;
+    id.delete();
+
+    assert!(hero.game_id == game_id, EWrongGame);
+    hero.health = (hero.health + potency).min(MAX_HP);
+}
+
+/// Equip sword
+public fun equip(hero: &mut Hero, sword: Sword) {
+    assert!(hero.sword.is_none(), EAlreadyEquipped);
+    hero.sword.fill(sword);
+}
+
+/// Unequip sword
+public fun unequip(hero: &mut Hero): Sword {
+    assert!(hero.sword.is_some(), ENotEquipped);
+    option::extract(&mut hero.sword)
+}
+```
+
+## Admin Functions
+
+```move
+/// Create game and return admin capability
+public fun new_game(ctx: &mut TxContext): Admin {
+    let game = Game {
+        id: object::new(ctx),
+        payments: balance::zero(),
+    };
+
+    let admin = Admin {
+        id: object::new(ctx),
+        game_id: object::id(&game),
+        boars_created: 0,
+        potions_created: 0,
+    };
+
+    transfer::share_object(game);
+    admin
+}
+
+/// Admin creates boar
+public fun new_boar(
+    admin: &mut Admin,
+    health: u64,
+    strength: u64,
+    ctx: &mut TxContext
+): Boar {
+    admin.boars_created = admin.boars_created + 1;
+    Boar {
+        id: object::new(ctx),
+        health,
+        strength,
+        game_id: admin.game_id,
+    }
+}
+
+/// Admin creates potion
+public fun new_potion(
+    admin: &mut Admin,
+    potency: u64,
+    ctx: &mut TxContext
+): Potion {
+    admin.potions_created = admin.potions_created + 1;
+    Potion {
+        id: object::new(ctx),
+        potency,
+        game_id: admin.game_id,
+    }
+}
+
+/// Admin collects payments
+public fun take_payment(
+    admin: &Admin,
+    game: &mut Game,
+    ctx: &mut TxContext
+): Coin<SUI> {
+    assert!(admin.game_id == object::id(game), ENotAdmin);
+    coin::from_balance(game.payments.withdraw_all(), ctx)
+}
+```
+
+## Playing the Game
+
+<Steps>
+
+### Deploy game
+
+```bash
+cd examples/move/hero
+sui client publish --gas-budget 100000000
+```
+
+### Create game instance
+
+```bash
+sui client call \
+  --package 0xPACKAGE_ID \
+  --module example \
+  --function new_game \
+  --gas-budget 10000000
+```
+
+### Buy sword and create hero
+
+```bash
+# Buy sword (100 MIST minimum)
+sui client call \
+  --package 0xPACKAGE_ID \
+  --module example \
+  --function new_sword \
+  --args 0xGAME_ID 0xPAYMENT_COIN \
+  --gas-budget 10000000
+
+# Create hero with sword
+sui client call \
+  --package 0xPACKAGE_ID \
+  --module example \
+  --function new_hero \
+  --args 0xSWORD_ID \
+  --gas-budget 10000000
+```
+
+### Battle a boar
+
+```bash
+sui client call \
+  --package 0xPACKAGE_ID \
+  --module example \
+  --function slay \
+  --args 0xHERO_ID 0xBOAR_ID \
+  --gas-budget 10000000
+```
+
+</Steps>
+
+## Key Game Design Patterns
+
+### 1. Game instance isolation
+
+```move
+// All objects tied to game instance
+public struct Hero has key, store {
+    id: UID,
+    game_id: ID,  // Links to specific game
+    // ...
+}
+
+// Validate same game
+assert!(hero.game_id == boar.game_id, EWrongGame);
+```
+
+### 2. Optional equipment
+
+```move
+public struct Hero has key, store {
+    sword: Option<Sword>,  // May or may not have weapon
+}
+```
+
+### 3. Consumable items
+
+```move
+public fun heal(hero: &mut Hero, potion: Potion) {
+    let Potion { id, potency, game_id: _ } = potion;
+    object::delete(id);  // Consume potion
+    hero.health = hero.health + potency;
+}
+```
+
+### 4. Battle events
+
+```move
+event::emit(BoarSlainEvent {
+    slayer_address: ctx.sender(),
+    hero: object::id(hero),
+    boar: boar_id,
+    game_id: hero.game_id,
+});
+```
+
+## Best Practices
+
+### 1. Isolate game instances
+
+Prevent cross-game interactions:
+
+```move
+assert!(hero.game_id == item.game_id, EWrongGame);
+```
+
+### 2. Use capability pattern for admin
+
+```move
+public fun admin_action(admin: &Admin, ...) {
+    // Only admin cap holder can call
+}
+```
+
+### 3. Make progression meaningful
+
+```move
+// Hero gets stronger with experience
+public fun hero_strength(hero: &Hero): u64 {
+    (hero.experience * hero.health) + sword_strength
+}
+```
+
+### 4. Emit events for game history
+
+```move
+event::emit(BattleResult { winner, loser, damage });
+```
+
+## Next Steps
+
+- [Learn about shared objects](/guides/shared-objects)
+- [Implement capability patterns](/guides/capability-pattern)
+- [Build programmable transactions](/guides/programmable-transactions)

@@ -1,0 +1,206 @@
+---
+title: Setting Up Your Development Environment
+description: Set up your local environment to develop on Sui with Move
+---
+
+This guide walks you through installing and configuring the necessary tools to start developing on Sui.
+
+## Prerequisites
+
+Before you begin, ensure you have:
+- A modern operating system (macOS, Linux, or Windows with WSL2)
+- At least 8GB of RAM
+- 10GB of free disk space
+
+## Install Sui CLI
+
+The Sui CLI is the primary tool for interacting with the Sui network and developing Move packages.
+
+<Steps>
+
+### Install Rust
+
+Sui requires Rust to be installed. Install it using rustup:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+After installation, configure your current shell:
+
+```bash
+source $HOME/.cargo/env
+```
+
+### Install Sui from source
+
+Clone the Sui repository and install the CLI:
+
+```bash
+cargo install --locked --git https://github.com/MystenLabs/sui.git --branch mainnet sui
+```
+
+This will install the `sui` binary to `~/.cargo/bin/`.
+
+### Verify installation
+
+Check that Sui is installed correctly:
+
+```bash
+sui --version
+```
+
+You should see output similar to:
+
+```
+sui 1.18.0-a9f87b9cc
+```
+
+### Initialize Sui configuration
+
+Run the client to initialize your configuration:
+
+```bash
+sui client
+```
+
+This creates a configuration file at `~/.sui/sui_config/client.yaml` and generates a new keypair.
+
+</Steps>
+
+## Configure Network Connection
+
+Sui supports multiple networks: localnet, devnet, testnet, and mainnet.
+
+### View active environment
+
+```bash
+sui client active-env
+```
+
+### Switch to testnet
+
+```bash
+sui client new-env --alias testnet --rpc https://fullnode.testnet.sui.io:443
+sui client switch --env testnet
+```
+
+### Get testnet tokens
+
+Request test SUI tokens from the faucet:
+
+```bash
+sui client faucet
+```
+
+### Check your address and balance
+
+```bash
+# View your address
+sui client active-address
+
+# Check balance
+sui client gas
+```
+
+## Install Development Tools
+
+### VS Code Extension
+
+For the best Move development experience, install the Move Analyzer extension:
+
+1. Open VS Code
+2. Go to Extensions (Cmd/Ctrl + Shift + X)
+3. Search for "Move" and install the Move Analyzer extension
+
+### Git
+
+Ensure Git is installed for version control:
+
+```bash
+git --version
+```
+
+If not installed, download from [git-scm.com](https://git-scm.com/).
+
+## Set Up Local Network (Optional)
+
+For local development and testing, you can run a local Sui network:
+
+<Steps>
+
+### Start local network
+
+```bash
+SUI_RUN_FULLNODE_MODE=1 sui start
+```
+
+This starts a local Sui network with a fullnode and faucet.
+
+### Switch to localnet
+
+In a new terminal:
+
+```bash
+sui client new-env --alias localnet --rpc http://127.0.0.1:9000
+sui client switch --env localnet
+```
+
+### Request local tokens
+
+```bash
+sui client faucet
+```
+
+</Steps>
+
+## Verify Your Setup
+
+Create a simple test to verify everything works:
+
+```bash
+# Check client is working
+sui client active-address
+
+# View available commands
+sui --help
+
+# Check Move compiler
+sui move --help
+```
+
+## Next Steps
+
+Now that your environment is set up:
+
+- [Create your first Move package](/guides/your-first-move-package)
+- [Learn about Move package structure](/guides/move-packages)
+- Explore [example Move code](https://github.com/MystenLabs/sui/tree/main/examples/move)
+
+## Troubleshooting
+
+### Rust toolchain issues
+
+If you encounter Rust version issues:
+
+```bash
+rustup update stable
+```
+
+### Network connectivity
+
+If you can't connect to a network, verify the RPC endpoint:
+
+```bash
+sui client envs
+```
+
+### Permission errors
+
+On Linux/macOS, you may need to add Cargo's bin directory to your PATH:
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+```
+
+Add this line to your `~/.bashrc` or `~/.zshrc` to make it permanent.

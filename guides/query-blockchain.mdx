@@ -1,0 +1,562 @@
+---
+title: Querying Blockchain Data
+description: Read and query data from the Sui blockchain
+---
+
+Learn how to efficiently query objects, transactions, events, and other on-chain data.
+
+## Querying Objects
+
+### Get owned objects
+
+<CodeGroup>
+```rust Rust
+use sui_sdk::SuiClientBuilder;
+use sui_sdk::rpc_types::SuiObjectDataOptions;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default().build_testnet().await?;
+    let address = /* your address */;
+
+    let objects = sui
+        .read_api()
+        .get_owned_objects(
+            address,
+            None,      // query filter
+            None,      // cursor for pagination
+            Some(50),  // limit
+        )
+        .await?;
+
+    for obj in objects.data {
+        println!("Object: {:?}", obj);
+    }
+
+    Ok(())
+}
+```
+
+```typescript TypeScript
+import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
+
+const client = new SuiClient({ url: getFullnodeUrl('testnet') });
+const address = '0x...';
+
+const objects = await client.getOwnedObjects({
+  owner: address,
+  options: {
+    showType: true,
+    showContent: true,
+  },
+});
+
+console.log('Objects:', objects.data);
+```
+</CodeGroup>
+
+### Get specific object
+
+<CodeGroup>
+```rust Rust
+let object_id: ObjectID = "0x...".parse()?;
+
+let object = sui
+    .read_api()
+    .get_object_with_options(
+        object_id,
+        SuiObjectDataOptions {
+            show_type: true,
+            show_owner: true,
+            show_content: true,
+            show_display: true,
+            show_bcs: true,
+            show_storage_rebate: true,
+            show_previous_transaction: true,
+        },
+    )
+    .await?;
+
+println!("Object: {:?}", object);
+```
+
+```typescript TypeScript
+const objectId = '0x...';
+
+const object = await client.getObject({
+  id: objectId,
+  options: {
+    showType: true,
+    showOwner: true,
+    showContent: true,
+    showDisplay: true,
+  },
+});
+
+console.log('Object:', object.data);
+```
+</CodeGroup>
+
+## Querying Coins
+
+### Get coin balances
+
+<CodeGroup>
+```rust Rust
+let balance = sui
+    .coin_read_api()
+    .get_balance(address, None) // None = SUI
+    .await?;
+
+println!("Balance: {}", balance.total_balance);
+
+// Get all coin types
+let all_balances = sui
+    .coin_read_api()
+    .get_all_balances(address)
+    .await?;
+
+for bal in all_balances {
+    println!("{}: {}", bal.coin_type, bal.total_balance);
+}
+```
+
+```typescript TypeScript
+const balance = await client.getBalance({
+  owner: address,
+  coinType: '0x2::sui::SUI',
+});
+
+console.log('Balance:', balance.totalBalance);
+
+// Get all balances
+const allBalances = await client.getAllBalances({
+  owner: address,
+});
+
+allBalances.forEach(b => {
+  console.log(`${b.coinType}: ${b.totalBalance}`);
+});
+```
+</CodeGroup>
+
+### Get individual coins
+
+<CodeGroup>
+```rust Rust
+let coins = sui
+    .coin_read_api()
+    .get_coins(address, None, None, None)
+    .await?;
+
+for coin in coins.data {
+    println!("Coin {} = {}", coin.coin_object_id, coin.balance);
+}
+```
+
+```typescript TypeScript
+const coins = await client.getCoins({
+  owner: address,
+  coinType: '0x2::sui::SUI',
+});
+
+coins.data.forEach(coin => {
+  console.log(`${coin.coinObjectId}: ${coin.balance}`);
+});
+```
+</CodeGroup>
+
+## Querying Transactions
+
+### Get transaction details
+
+<CodeGroup>
+```rust Rust
+use sui_sdk::rpc_types::SuiTransactionBlockResponseOptions;
+
+let tx = sui
+    .read_api()
+    .get_transaction_with_options(
+        digest,
+        SuiTransactionBlockResponseOptions {
+            show_input: true,
+            show_effects: true,
+            show_events: true,
+            show_object_changes: true,
+            show_balance_changes: true,
+            show_raw_input: false,
+            show_raw_effects: false,
+        },
+    )
+    .await?;
+
+println!("Transaction: {:?}", tx);
+```
+
+```typescript TypeScript
+const tx = await client.getTransactionBlock({
+  digest: txDigest,
+  options: {
+    showInput: true,
+    showEffects: true,
+    showEvents: true,
+    showObjectChanges: true,
+    showBalanceChanges: true,
+  },
+});
+
+console.log('Transaction:', tx);
+```
+</CodeGroup>
+
+### Query transactions
+
+<CodeGroup>
+```typescript TypeScript
+// Get transactions for an address
+const txs = await client.queryTransactionBlocks({
+  filter: {
+    FromAddress: address,
+  },
+  options: {
+    showEffects: true,
+  },
+  limit: 50,
+});
+
+// Get transactions that changed an object
+const objTxs = await client.queryTransactionBlocks({
+  filter: {
+    ChangedObject: objectId,
+  },
+});
+```
+</CodeGroup>
+
+## Querying Events
+
+### Query by event type
+
+<CodeGroup>
+```rust Rust
+use sui_sdk::rpc_types::EventFilter;
+
+let events = sui
+    .event_api()
+    .query_events(
+        EventFilter::MoveEventType(
+            "0x2::coin::Deposit".parse()?
+        ),
+        None,     // cursor
+        Some(50), // limit
+        false,    // descending
+    )
+    .await?;
+
+for event in events.data {
+    println!("Event: {:?}", event);
+}
+```
+
+```typescript TypeScript
+const events = await client.queryEvents({
+  query: {
+    MoveEventType: '0xPACKAGE::module::EventType',
+  },
+  limit: 50,
+});
+
+console.log('Events:', events.data);
+```
+</CodeGroup>
+
+### Query by sender
+
+<CodeGroup>
+```rust Rust
+let events = sui
+    .event_api()
+    .query_events(
+        EventFilter::Sender(address),
+        None,
+        Some(100),
+        false,
+    )
+    .await?;
+```
+
+```typescript TypeScript
+const events = await client.queryEvents({
+  query: {
+    Sender: address,
+  },
+  limit: 100,
+});
+```
+</CodeGroup>
+
+## Dynamic Fields
+
+### Get dynamic fields
+
+<CodeGroup>
+```rust Rust
+let parent_id: ObjectID = "0x...".parse()?;
+
+let fields = sui
+    .read_api()
+    .get_dynamic_fields(parent_id, None, None)
+    .await?;
+
+for field in fields.data {
+    println!("Field: {:?}", field);
+    
+    // Get field value
+    let field_obj = sui
+        .read_api()
+        .get_dynamic_field_object(parent_id, field.name)
+        .await?;
+    println!("Value: {:?}", field_obj);
+}
+```
+
+```typescript TypeScript
+const fields = await client.getDynamicFields({
+  parentId: objectId,
+});
+
+for (const field of fields.data) {
+  console.log('Field:', field);
+  
+  const fieldObj = await client.getDynamicFieldObject({
+    parentId: objectId,
+    name: field.name,
+  });
+  console.log('Value:', fieldObj);
+}
+```
+</CodeGroup>
+
+## Pagination
+
+### Paginate through objects
+
+<CodeGroup>
+```rust Rust
+let mut cursor = None;
+let mut all_objects = Vec::new();
+
+loop {
+    let response = sui
+        .read_api()
+        .get_owned_objects(address, None, cursor, Some(50))
+        .await?;
+
+    all_objects.extend(response.data);
+
+    if !response.has_next_page {
+        break;
+    }
+    cursor = response.next_cursor;
+}
+
+println!("Total objects: {}", all_objects.len());
+```
+
+```typescript TypeScript
+let cursor = null;
+const allObjects = [];
+
+while (true) {
+  const response = await client.getOwnedObjects({
+    owner: address,
+    cursor,
+    limit: 50,
+  });
+
+  allObjects.push(...response.data);
+
+  if (!response.hasNextPage) break;
+  cursor = response.nextCursor;
+}
+
+console.log('Total objects:', allObjects.length);
+```
+</CodeGroup>
+
+## Filtering Objects
+
+### Filter by type
+
+<CodeGroup>
+```typescript TypeScript
+const objects = await client.getOwnedObjects({
+  owner: address,
+  filter: {
+    StructType: '0xPACKAGE::module::TypeName',
+  },
+});
+```
+</CodeGroup>
+
+### Filter by package
+
+<CodeGroup>
+```typescript TypeScript
+const objects = await client.getOwnedObjects({
+  owner: address,
+  filter: {
+    Package: packageId,
+  },
+});
+```
+</CodeGroup>
+
+## Checkpoint Queries
+
+### Get latest checkpoint
+
+<CodeGroup>
+```rust Rust
+let latest = sui
+    .read_api()
+    .get_latest_checkpoint_sequence_number()
+    .await?;
+
+println!("Latest checkpoint: {}", latest);
+```
+
+```typescript TypeScript
+const latest = await client.getLatestCheckpointSequenceNumber();
+console.log('Latest checkpoint:', latest);
+```
+</CodeGroup>
+
+### Get checkpoint details
+
+<CodeGroup>
+```rust Rust
+let checkpoint = sui
+    .read_api()
+    .get_checkpoint(checkpoint_id)
+    .await?;
+
+println!("Checkpoint: {:?}", checkpoint);
+```
+
+```typescript TypeScript
+const checkpoint = await client.getCheckpoint({
+  id: checkpointId,
+});
+
+console.log('Checkpoint:', checkpoint);
+```
+</CodeGroup>
+
+## Protocol Information
+
+### Get protocol config
+
+<CodeGroup>
+```rust Rust
+let config = sui
+    .read_api()
+    .get_protocol_config(None)
+    .await?;
+
+println!("Max tx gas: {}", config.max_tx_gas);
+println!("Protocol version: {}", config.protocol_version);
+```
+
+```typescript TypeScript
+const config = await client.getProtocolConfig();
+console.log('Protocol version:', config.protocolVersion);
+```
+</CodeGroup>
+
+### Get chain identifier
+
+<CodeGroup>
+```rust Rust
+let chain_id = sui
+    .read_api()
+    .get_chain_identifier()
+    .await?;
+
+println!("Chain ID: {}", chain_id);
+```
+
+```typescript TypeScript
+const chainId = await client.getChainIdentifier();
+console.log('Chain ID:', chainId);
+```
+</CodeGroup>
+
+## Best Practices
+
+### 1. Use pagination for large datasets
+
+```typescript
+// Good: Paginate
+let cursor = null;
+while (true) {
+  const page = await client.getOwnedObjects({
+    owner: address,
+    cursor,
+    limit: 50,
+  });
+  // Process page
+  if (!page.hasNextPage) break;
+  cursor = page.nextCursor;
+}
+```
+
+### 2. Request only needed data
+
+```typescript
+// Good: Only request what you need
+const objects = await client.getOwnedObjects({
+  owner: address,
+  options: {
+    showType: true,  // Only type, not full content
+  },
+});
+```
+
+### 3. Cache expensive queries
+
+```typescript
+const cache = new Map();
+
+async function getCachedBalance(address: string) {
+  if (cache.has(address)) {
+    const { balance, timestamp } = cache.get(address);
+    if (Date.now() - timestamp < 10000) { // 10s cache
+      return balance;
+    }
+  }
+
+  const balance = await client.getBalance({ owner: address });
+  cache.set(address, { balance, timestamp: Date.now() });
+  return balance;
+}
+```
+
+### 4. Handle errors gracefully
+
+```typescript
+async function safeGetObject(objectId: string) {
+  try {
+    return await client.getObject({ id: objectId });
+  } catch (error) {
+    console.error(`Failed to fetch object ${objectId}:`, error);
+    return null;
+  }
+}
+```
+
+## Next Steps
+
+- [Build transactions](/guides/build-transactions)
+- [Work with programmable transactions](/guides/programmable-transactions)
+- [Index blockchain data](/guides/indexing-data)

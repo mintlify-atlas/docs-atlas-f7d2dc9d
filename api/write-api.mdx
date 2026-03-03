@@ -1,0 +1,200 @@
+---
+title: WriteApi
+description: Execute transactions and inspect transaction effects
+---
+
+The WriteApi provides methods for executing and testing transactions on the Sui network. All methods are in the `sui` namespace.
+
+## Methods
+
+### executeTransactionBlock
+
+Executes a signed transaction and waits for results based on the request type.
+
+<ParamField path="tx_bytes" type="Base64" required>
+  BCS serialized transaction data bytes without its type tag, as base64-encoded string
+</ParamField>
+
+<ParamField path="signatures" type="Base64[]" required>
+  List of signatures (`flag || signature || pubkey` bytes) as base64-encoded strings. Each signature is committed to the intent message of the transaction data
+</ParamField>
+
+<ParamField path="options" type="SuiTransactionBlockResponseOptions">
+  Options for specifying the content to be returned
+</ParamField>
+
+<ParamField path="request_type" type="ExecuteTransactionRequestType">
+  The request type, derived from `SuiTransactionBlockResponseOptions` if None
+  
+  <Expandable title="request types">
+    - **WaitForEffectsCert**: Waits for TransactionEffectsCert and returns. This mode is a proxy for transaction finality
+    - **WaitForLocalExecution**: Waits for TransactionEffectsCert and ensures the node executed the transaction locally before returning. If the node fails to execute locally in a timely manner, `confirmed_local_execution` is set to false
+  </Expandable>
+</ParamField>
+
+<ResponseField name="result" type="SuiTransactionBlockResponse">
+  The transaction execution result
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "sui_executeTransactionBlock",
+    "params": [
+      "AAACA...",
+      ["AQA..."],
+      {
+        "showInput": true,
+        "showEffects": true,
+        "showEvents": true
+      },
+      "WaitForLocalExecution"
+    ]
+  }'
+```
+
+---
+
+### devInspectTransactionBlock
+
+Runs the transaction in dev-inspect mode. This allows nearly any transaction (or Move call) with any arguments. Detailed results are provided, including both the transaction effects and any return values.
+
+<Info>
+  Dev inspect does not validate ownership, visibility, or other constraints. Use this for debugging and testing only.
+</Info>
+
+<ParamField path="sender_address" type="SuiAddress" required>
+  The sender address
+</ParamField>
+
+<ParamField path="tx_bytes" type="Base64" required>
+  BCS encoded TransactionKind (as opposed to TransactionData, which includes gasBudget and gasPrice)
+</ParamField>
+
+<ParamField path="gas_price" type="BigInt<u64>">
+  Gas price to use. Gas is not charged, but gas usage is still calculated. Defaults to reference gas price
+</ParamField>
+
+<ParamField path="epoch" type="BigInt<u64>">
+  The epoch to perform the call. Will be set from the system state object if not provided
+</ParamField>
+
+<ParamField path="additional_args" type="DevInspectArgs">
+  Additional arguments including gas_budget, gas_objects, gas_sponsor and skip_checks
+  
+  <Expandable title="additional_args fields">
+    <ParamField path="gas_budget" type="BigInt<u64>">Gas budget for the transaction</ParamField>
+    <ParamField path="gas_objects" type="ObjectID[]">Specific gas objects to use</ParamField>
+    <ParamField path="gas_sponsor" type="SuiAddress">Gas sponsor address</ParamField>
+    <ParamField path="skip_checks" type="boolean">Skip additional validation checks</ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="result" type="DevInspectResults">
+  The inspection results, including return values and effects
+  
+  <Expandable title="response fields">
+    <ResponseField name="effects" type="TransactionEffects">Transaction effects</ResponseField>
+    <ResponseField name="events" type="SuiEvent[]">Events emitted</ResponseField>
+    <ResponseField name="results" type="ExecutionResult[]">Execution results for each command</ResponseField>
+    <ResponseField name="error" type="string">Error message if execution failed</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "sui_devInspectTransactionBlock",
+    "params": [
+      "0x...",
+      "AAACA...",
+      null,
+      null,
+      {
+        "gas_budget": "10000000"
+      }
+    ]
+  }'
+```
+
+---
+
+### dryRunTransactionBlock
+
+Returns transaction execution effects including the gas cost summary, without committing the effects to the chain.
+
+<Info>
+  Unlike dev-inspect, dry run validates all transaction constraints (ownership, signatures, etc.) as if executing on-chain.
+</Info>
+
+<ParamField path="tx_bytes" type="Base64" required>
+  BCS serialized transaction data bytes as base64-encoded string
+</ParamField>
+
+<ResponseField name="result" type="DryRunTransactionBlockResponse">
+  The dry run results
+  
+  <Expandable title="response fields">
+    <ResponseField name="effects" type="TransactionEffects">Transaction effects that would occur</ResponseField>
+    <ResponseField name="events" type="SuiEvent[]">Events that would be emitted</ResponseField>
+    <ResponseField name="objectChanges" type="ObjectChange[]">Object changes that would occur</ResponseField>
+    <ResponseField name="balanceChanges" type="BalanceChange[]">Balance changes that would occur</ResponseField>
+    <ResponseField name="input" type="TransactionData">The input transaction data</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "sui_dryRunTransactionBlock",
+    "params": [
+      "AAACA..."
+    ]
+  }'
+```
+
+## Dev Inspect vs Dry Run
+
+| Feature | devInspectTransactionBlock | dryRunTransactionBlock |
+|---------|---------------------------|------------------------|
+| Validates ownership | No | Yes |
+| Validates signatures | No | Yes |
+| Checks visibility | No | Yes |
+| Allows any inputs | Yes | No |
+| Gas charged | No | No |
+| Use case | Debugging, testing | Pre-flight validation |
+
+## Usage Example with Rust SDK
+
+```rust
+use sui_sdk::SuiClientBuilder;
+use sui_types::transaction::TransactionData;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default()
+        .build("https://fullnode.mainnet.sui.io:443")
+        .await?;
+    
+    // Build transaction data
+    let tx_data: TransactionData = /* ... */;
+    
+    // Dry run before executing
+    let dry_run = sui.read_api()
+        .dry_run_transaction_block(tx_data.clone())
+        .await?;
+    
+    println!("Gas cost: {:?}", dry_run.effects.gas_used());
+    
+    Ok(())
+}
+```

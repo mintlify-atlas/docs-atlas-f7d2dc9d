@@ -1,0 +1,431 @@
+---
+title: TransactionBuilder API
+description: Build unsigned transactions (use SDKs for production)
+---
+
+<Warning>
+  The TransactionBuilder API is in the `unsafe` namespace because it's intended for development and testing. For production applications, use the [Rust SDK](/api/rust-sdk/transaction-builder) or TypeScript SDK instead.
+</Warning>
+
+The TransactionBuilder API provides methods for building unsigned transaction blocks. All methods are in the `unsafe` namespace.
+
+## Transfer Methods
+
+### transferObject
+
+Creates an unsigned transaction to transfer an object from one address to another. The object's type must allow public transfers.
+
+<ParamField path="signer" type="SuiAddress" required>
+  The transaction signer's Sui address
+</ParamField>
+
+<ParamField path="object_id" type="ObjectID" required>
+  The ID of the object to be transferred
+</ParamField>
+
+<ParamField path="gas" type="ObjectID">
+  Gas object to be used in this transaction. Node will pick one from the signer's possession if not provided
+</ParamField>
+
+<ParamField path="gas_budget" type="BigInt<u64>" required>
+  The gas budget. The transaction will fail if the gas cost exceeds the budget
+</ParamField>
+
+<ParamField path="recipient" type="SuiAddress" required>
+  The recipient's Sui address
+</ParamField>
+
+<ResponseField name="result" type="TransactionBlockBytes">
+  The unsigned transaction bytes
+</ResponseField>
+
+---
+
+### transferSui
+
+Creates an unsigned transaction to send SUI coin object to a Sui address. The SUI object is also used as the gas object.
+
+<ParamField path="signer" type="SuiAddress" required>
+  The transaction signer's Sui address
+</ParamField>
+
+<ParamField path="sui_object_id" type="ObjectID" required>
+  The Sui coin object to be used in this transaction
+</ParamField>
+
+<ParamField path="gas_budget" type="BigInt<u64>" required>
+  The gas budget. The transaction will fail if the gas cost exceeds the budget
+</ParamField>
+
+<ParamField path="recipient" type="SuiAddress" required>
+  The recipient's Sui address
+</ParamField>
+
+<ParamField path="amount" type="BigInt<u64>">
+  The amount to be split out and transferred
+</ParamField>
+
+<ResponseField name="result" type="TransactionBlockBytes">
+  The unsigned transaction bytes
+</ResponseField>
+
+## Payment Methods
+
+### pay
+
+Sends `Coin<T>` to a list of addresses, where `T` can be any coin type, following a list of amounts.
+
+<ParamField path="signer" type="SuiAddress" required>
+  The transaction signer's Sui address
+</ParamField>
+
+<ParamField path="input_coins" type="ObjectID[]" required>
+  The Sui coins to be used in this transaction
+</ParamField>
+
+<ParamField path="recipients" type="SuiAddress[]" required>
+  The recipients' addresses (length must match amounts)
+</ParamField>
+
+<ParamField path="amounts" type="BigInt<u64>[]" required>
+  The amounts to be transferred to recipients, following the same order
+</ParamField>
+
+<ParamField path="gas" type="ObjectID">
+  Gas object to be used. Cannot appear in `input_coins`. Node will pick one if not provided
+</ParamField>
+
+<ParamField path="gas_budget" type="BigInt<u64>" required>
+  The gas budget
+</ParamField>
+
+<ResponseField name="result" type="TransactionBlockBytes">
+  The unsigned transaction bytes
+</ResponseField>
+
+---
+
+### paySui
+
+Sends SUI coins to a list of addresses, following a list of amounts. This is for SUI coin only and does not require a separate gas coin object.
+
+<Info>
+  The first input coin is used as the gas coin. Its balance after the transaction is: `sum(input_coins) - sum(amounts) - actual_gas_cost`
+</Info>
+
+<ParamField path="signer" type="SuiAddress" required>
+  The transaction signer's Sui address
+</ParamField>
+
+<ParamField path="input_coins" type="ObjectID[]" required>
+  The Sui coins to be used, including the coin for gas payment
+</ParamField>
+
+<ParamField path="recipients" type="SuiAddress[]" required>
+  The recipients' addresses (length must match amounts)
+</ParamField>
+
+<ParamField path="amounts" type="BigInt<u64>[]" required>
+  The amounts to be transferred to recipients
+</ParamField>
+
+<ParamField path="gas_budget" type="BigInt<u64>" required>
+  The gas budget
+</ParamField>
+
+<ResponseField name="result" type="TransactionBlockBytes">
+  The unsigned transaction bytes
+</ResponseField>
+
+---
+
+### payAllSui
+
+Sends all SUI coins to one recipient. This is for SUI coin only and does not require a separate gas coin.
+
+<ParamField path="signer" type="SuiAddress" required>
+  The transaction signer's Sui address
+</ParamField>
+
+<ParamField path="input_coins" type="ObjectID[]" required>
+  The Sui coins to be used, including the coin for gas payment
+</ParamField>
+
+<ParamField path="recipient" type="SuiAddress" required>
+  The recipient address
+</ParamField>
+
+<ParamField path="gas_budget" type="BigInt<u64>" required>
+  The gas budget
+</ParamField>
+
+<ResponseField name="result" type="TransactionBlockBytes">
+  The unsigned transaction bytes
+</ResponseField>
+
+## Move Call Methods
+
+### moveCall
+
+Creates an unsigned transaction to execute a Move call on the network.
+
+<ParamField path="signer" type="SuiAddress" required>
+  The transaction signer's Sui address
+</ParamField>
+
+<ParamField path="package_object_id" type="ObjectID" required>
+  The Move package ID (e.g., `0x2`)
+</ParamField>
+
+<ParamField path="module" type="string" required>
+  The Move module name (e.g., `pay`)
+</ParamField>
+
+<ParamField path="function" type="string" required>
+  The Move function name (e.g., `split`)
+</ParamField>
+
+<ParamField path="type_arguments" type="SuiTypeTag[]" required>
+  The type arguments of the Move function
+</ParamField>
+
+<ParamField path="arguments" type="SuiJsonValue[]" required>
+  The arguments to be passed into the Move function, in SuiJson format
+</ParamField>
+
+<ParamField path="gas" type="ObjectID">
+  Gas object to be used. Node will pick one if not provided
+</ParamField>
+
+<ParamField path="gas_budget" type="BigInt<u64>" required>
+  The gas budget
+</ParamField>
+
+<ParamField path="execution_mode" type="SuiTransactionBlockBuilderMode">
+  Whether this is a Normal transaction or Dev Inspect. Defaults to `Commit`
+</ParamField>
+
+<ResponseField name="result" type="TransactionBlockBytes">
+  The unsigned transaction bytes
+</ResponseField>
+
+---
+
+### publish
+
+Creates an unsigned transaction to publish a Move package.
+
+<ParamField path="sender" type="SuiAddress" required>
+  The transaction signer's Sui address
+</ParamField>
+
+<ParamField path="compiled_modules" type="Base64[]" required>
+  The compiled bytes of a Move package
+</ParamField>
+
+<ParamField path="dependencies" type="ObjectID[]" required>
+  A list of transitive dependency addresses that this set of modules depends on
+</ParamField>
+
+<ParamField path="gas" type="ObjectID">
+  Gas object to be used. Node will pick one if not provided
+</ParamField>
+
+<ParamField path="gas_budget" type="BigInt<u64>" required>
+  The gas budget
+</ParamField>
+
+<ResponseField name="result" type="TransactionBlockBytes">
+  The unsigned transaction bytes
+</ResponseField>
+
+## Coin Operations
+
+### splitCoin
+
+Creates an unsigned transaction to split a coin object into multiple coins.
+
+<ParamField path="signer" type="SuiAddress" required>
+  The transaction signer's Sui address
+</ParamField>
+
+<ParamField path="coin_object_id" type="ObjectID" required>
+  The coin object to be split
+</ParamField>
+
+<ParamField path="split_amounts" type="BigInt<u64>[]" required>
+  The amounts to split out from the coin
+</ParamField>
+
+<ParamField path="gas" type="ObjectID">
+  Gas object to be used
+</ParamField>
+
+<ParamField path="gas_budget" type="BigInt<u64>" required>
+  The gas budget
+</ParamField>
+
+<ResponseField name="result" type="TransactionBlockBytes">
+  The unsigned transaction bytes
+</ResponseField>
+
+---
+
+### splitCoinEqual
+
+Creates an unsigned transaction to split a coin object into multiple equal-size coins.
+
+<ParamField path="signer" type="SuiAddress" required>
+  The transaction signer's Sui address
+</ParamField>
+
+<ParamField path="coin_object_id" type="ObjectID" required>
+  The coin object to be split
+</ParamField>
+
+<ParamField path="split_count" type="BigInt<u64>" required>
+  The number of coins to split into
+</ParamField>
+
+<ParamField path="gas" type="ObjectID">
+  Gas object to be used
+</ParamField>
+
+<ParamField path="gas_budget" type="BigInt<u64>" required>
+  The gas budget
+</ParamField>
+
+<ResponseField name="result" type="TransactionBlockBytes">
+  The unsigned transaction bytes
+</ResponseField>
+
+---
+
+### mergeCoins
+
+Creates an unsigned transaction to merge multiple coins into one coin.
+
+<ParamField path="signer" type="SuiAddress" required>
+  The transaction signer's Sui address
+</ParamField>
+
+<ParamField path="primary_coin" type="ObjectID" required>
+  The coin object to merge into (remains after transaction)
+</ParamField>
+
+<ParamField path="coin_to_merge" type="ObjectID" required>
+  The coin object to be merged (destroyed, balance added to primary_coin)
+</ParamField>
+
+<ParamField path="gas" type="ObjectID">
+  Gas object to be used
+</ParamField>
+
+<ParamField path="gas_budget" type="BigInt<u64>" required>
+  The gas budget
+</ParamField>
+
+<ResponseField name="result" type="TransactionBlockBytes">
+  The unsigned transaction bytes
+</ResponseField>
+
+## Staking Operations
+
+### requestAddStake
+
+Adds stake to a validator's staking pool using multiple coins and amount.
+
+<ParamField path="signer" type="SuiAddress" required>
+  The transaction signer's Sui address
+</ParamField>
+
+<ParamField path="coins" type="ObjectID[]" required>
+  Coin objects (SUI) to stake
+</ParamField>
+
+<ParamField path="amount" type="BigInt<u64>">
+  Stake amount
+</ParamField>
+
+<ParamField path="validator" type="SuiAddress" required>
+  The validator's Sui address
+</ParamField>
+
+<ParamField path="gas" type="ObjectID">
+  Gas object to be used
+</ParamField>
+
+<ParamField path="gas_budget" type="BigInt<u64>" required>
+  The gas budget
+</ParamField>
+
+<ResponseField name="result" type="TransactionBlockBytes">
+  The unsigned transaction bytes
+</ResponseField>
+
+---
+
+### requestWithdrawStake
+
+Withdraws stake from a validator's staking pool.
+
+<ParamField path="signer" type="SuiAddress" required>
+  The transaction signer's Sui address
+</ParamField>
+
+<ParamField path="staked_sui" type="ObjectID" required>
+  StakedSui object ID
+</ParamField>
+
+<ParamField path="gas" type="ObjectID">
+  Gas object to be used
+</ParamField>
+
+<ParamField path="gas_budget" type="BigInt<u64>" required>
+  The gas budget
+</ParamField>
+
+<ResponseField name="result" type="TransactionBlockBytes">
+  The unsigned transaction bytes
+</ResponseField>
+
+## Batch Transactions
+
+### batchTransaction
+
+Creates an unsigned batched transaction.
+
+<ParamField path="signer" type="SuiAddress" required>
+  The transaction signer's Sui address
+</ParamField>
+
+<ParamField path="single_transaction_params" type="RPCTransactionRequestParams[]" required>
+  List of transaction request parameters
+</ParamField>
+
+<ParamField path="gas" type="ObjectID">
+  Gas object to be used
+</ParamField>
+
+<ParamField path="gas_budget" type="BigInt<u64>" required>
+  The gas budget
+</ParamField>
+
+<ParamField path="txn_builder_mode" type="SuiTransactionBlockBuilderMode">
+  Whether this is a regular transaction or Dev Inspect
+</ParamField>
+
+<ResponseField name="result" type="TransactionBlockBytes">
+  The unsigned transaction bytes
+</ResponseField>
+
+## Migration Note
+
+<Warning>
+  Instead of using these RPC methods directly, consider using:
+  
+  - [Rust SDK TransactionBuilder](/api/rust-sdk/transaction-builder) for type-safe transaction building
+  - TypeScript SDK `TransactionBlock` class for frontend applications
+  
+  These provide better developer experience, type safety, and error handling.
+</Warning>

@@ -1,0 +1,392 @@
+---
+title: DeepBook Protocol
+description: Decentralized order book protocol for Sui
+---
+
+DeepBook is a decentralized central limit order book (CLOB) built natively on Sui. It provides efficient on-chain trading with minimal MEV and high throughput.
+
+## Overview
+
+DeepBook enables:
+- **Order Book Trading**: Limit and market orders
+- **Atomic Matching**: Instant order matching in a single transaction
+- **Low Latency**: Leveraging Sui's parallel execution
+- **Deep Liquidity**: Aggregated order book for all trading pairs
+- **MEV Protection**: Fair order execution
+
+## Core Modules
+
+### clob_v2.move
+
+The main CLOB implementation (v2 is the current version).
+
+**Key Types:**
+```move
+struct Pool<BaseAsset, QuoteAsset> has key {
+    id: UID,
+    bids: CritbitTree<TickLevel>,
+    asks: CritbitTree<TickLevel>,
+    // ... other fields
+}
+
+struct Order has store {
+    order_id: u64,
+    price: u64,
+    quantity: u64,
+    is_bid: bool,
+    owner: address,
+    // ... other fields
+}
+```
+
+**Key Functions:**
+```move
+// Create new pool
+public fun create_pool<BaseAsset, QuoteAsset>(
+    tick_size: u64,
+    lot_size: u64,
+    min_size: u64,
+    ctx: &mut TxContext
+): Pool<BaseAsset, QuoteAsset>
+
+// Place limit order
+public fun place_limit_order<BaseAsset, QuoteAsset>(
+    pool: &mut Pool<BaseAsset, QuoteAsset>,
+    price: u64,
+    quantity: u64,
+    is_bid: bool,
+    account_cap: &AccountCap,
+    ctx: &mut TxContext
+): u64 // returns order_id
+
+// Place market order
+public fun place_market_order<BaseAsset, QuoteAsset>(
+    pool: &mut Pool<BaseAsset, QuoteAsset>,
+    quantity: u64,
+    is_bid: bool,
+    base_coin: Coin<BaseAsset>,
+    quote_coin: Coin<QuoteAsset>,
+    clock: &Clock,
+    ctx: &mut TxContext
+): (Coin<BaseAsset>, Coin<QuoteAsset>)
+
+// Cancel order
+public fun cancel_order<BaseAsset, QuoteAsset>(
+    pool: &mut Pool<BaseAsset, QuoteAsset>,
+    order_id: u64,
+    account_cap: &AccountCap
+): (u64, u64) // returns (base_quantity, quote_quantity)
+
+// Get best bid price
+public fun best_bid_price<BaseAsset, QuoteAsset>(
+    pool: &Pool<BaseAsset, QuoteAsset>
+): Option<u64>
+
+// Get best ask price
+public fun best_ask_price<BaseAsset, QuoteAsset>(
+    pool: &Pool<BaseAsset, QuoteAsset>
+): Option<u64>
+```
+
+---
+
+### custodian_v2.move
+
+Manages user accounts and balances within DeepBook.
+
+**Key Types:**
+```move
+struct AccountCap has key, store {
+    id: UID,
+    owner: address,
+}
+
+struct Account<BaseAsset, QuoteAsset> has store {
+    available_balance: Balance<BaseAsset>,
+    locked_balance: Balance<BaseAsset>,
+    // ... other fields
+}
+```
+
+**Key Functions:**
+```move
+// Create account
+public fun create_account(ctx: &mut TxContext): AccountCap
+
+// Deposit
+public fun deposit<Asset>(
+    account_cap: &AccountCap,
+    coin: Coin<Asset>,
+    custodian: &mut Custodian
+)
+
+// Withdraw
+public fun withdraw<Asset>(
+    account_cap: &AccountCap,
+    amount: u64,
+    custodian: &mut Custodian,
+    ctx: &mut TxContext
+): Coin<Asset>
+```
+
+---
+
+### order_query.move
+
+Provides read-only functions for querying order book state.
+
+**Key Functions:**
+```move
+// Get orders for account
+public fun get_orders<BaseAsset, QuoteAsset>(
+    pool: &Pool<BaseAsset, QuoteAsset>,
+    account_cap: &AccountCap
+): vector<Order>
+
+// Get market price
+public fun get_market_price<BaseAsset, QuoteAsset>(
+    pool: &Pool<BaseAsset, QuoteAsset>
+): u64
+
+// Get order book depth
+public fun get_level2_book_status<BaseAsset, QuoteAsset>(
+    pool: &Pool<BaseAsset, QuoteAsset>,
+    price_low: u64,
+    price_high: u64,
+    side: u8
+): (vector<u64>, vector<u64>) // returns (prices, quantities)
+```
+
+---
+
+## Usage Examples
+
+### Create a Trading Pool
+
+```move
+use deepbook::clob_v2;
+use sui::coin::{Coin, SUI};
+
+struct USDC has drop {}
+
+public fun create_sui_usdc_pool(ctx: &mut TxContext) {
+    let pool = clob_v2::create_pool<SUI, USDC>(
+        1_000_000, // tick_size: 0.001 USDC
+        1_000_000, // lot_size: 0.001 SUI
+        1_000_000, // min_size: 0.001 SUI
+        ctx
+    );
+    
+    transfer::share_object(pool);
+}
+```
+
+### Place Limit Order
+
+```move
+use deepbook::clob_v2;
+use deepbook::custodian_v2;
+
+public fun place_bid(
+    pool: &mut Pool<SUI, USDC>,
+    account_cap: &AccountCap,
+    price: u64,
+    quantity: u64,
+    ctx: &mut TxContext
+) {
+    let order_id = clob_v2::place_limit_order(
+        pool,
+        price,
+        quantity,
+        true, // is_bid
+        account_cap,
+        ctx
+    );
+    
+    // Order placed, order_id can be used to cancel
+}
+```
+
+### Place Market Order
+
+```move
+public fun swap_sui_for_usdc(
+    pool: &mut Pool<SUI, USDC>,
+    sui_coin: Coin<SUI>,
+    clock: &Clock,
+    ctx: &mut TxContext
+): Coin<USDC> {
+    let quantity = coin::value(&sui_coin);
+    
+    let (remaining_sui, usdc) = clob_v2::place_market_order(
+        pool,
+        quantity,
+        true, // buying USDC with SUI (bid)
+        sui_coin,
+        coin::zero<USDC>(ctx),
+        clock,
+        ctx
+    );
+    
+    // Handle remaining SUI if any
+    if (coin::value(&remaining_sui) > 0) {
+        transfer::public_transfer(remaining_sui, tx_context::sender(ctx));
+    } else {
+        coin::destroy_zero(remaining_sui);
+    };
+    
+    usdc
+}
+```
+
+### Cancel Order
+
+```move
+public fun cancel_my_order(
+    pool: &mut Pool<SUI, USDC>,
+    order_id: u64,
+    account_cap: &AccountCap,
+    ctx: &mut TxContext
+) {
+    let (base_returned, quote_returned) = clob_v2::cancel_order(
+        pool,
+        order_id,
+        account_cap
+    );
+    
+    // Funds returned to account balance
+}
+```
+
+### Query Order Book
+
+```move
+use deepbook::order_query;
+
+public fun get_best_prices<BaseAsset, QuoteAsset>(
+    pool: &Pool<BaseAsset, QuoteAsset>
+): (Option<u64>, Option<u64>) {
+    let best_bid = clob_v2::best_bid_price(pool);
+    let best_ask = clob_v2::best_ask_price(pool);
+    
+    (best_bid, best_ask)
+}
+
+public fun get_order_book_depth<BaseAsset, QuoteAsset>(
+    pool: &Pool<BaseAsset, QuoteAsset>,
+    price_low: u64,
+    price_high: u64
+): (vector<u64>, vector<u64>) {
+    order_query::get_level2_book_status(
+        pool,
+        price_low,
+        price_high,
+        0 // 0 for bids, 1 for asks
+    )
+}
+```
+
+## Account Management
+
+### Create Account
+
+```move
+use deepbook::custodian_v2;
+
+public fun setup_trading_account(ctx: &mut TxContext) {
+    let account_cap = custodian_v2::create_account(ctx);
+    transfer::public_transfer(account_cap, tx_context::sender(ctx));
+}
+```
+
+### Deposit Funds
+
+```move
+public fun deposit_funds<Asset>(
+    account_cap: &AccountCap,
+    coin: Coin<Asset>,
+    custodian: &mut Custodian
+) {
+    custodian_v2::deposit(account_cap, coin, custodian);
+}
+```
+
+### Withdraw Funds
+
+```move
+public fun withdraw_funds<Asset>(
+    account_cap: &AccountCap,
+    amount: u64,
+    custodian: &mut Custodian,
+    ctx: &mut TxContext
+): Coin<Asset> {
+    custodian_v2::withdraw(
+        account_cap,
+        amount,
+        custodian,
+        ctx
+    )
+}
+```
+
+## Price Levels and Matching
+
+DeepBook uses:
+- **Tick Size**: Minimum price increment
+- **Lot Size**: Minimum quantity increment
+- **Price-Time Priority**: Orders matched by price, then timestamp
+- **Post-Only Orders**: Optional for market makers
+- **Fill-or-Kill**: Optional for immediate execution
+
+## Best Practices
+
+1. **Use AccountCap**: Always use account capabilities for custody
+2. **Handle Partial Fills**: Market orders may be partially filled
+3. **Check Slippage**: Monitor price impact for large orders
+4. **Cancel Stale Orders**: Clean up unfilled orders
+5. **Query Before Trading**: Check order book depth and spread
+
+## Integration Example
+
+```move
+module my_dex::trader {
+    use deepbook::clob_v2::{Self, Pool};
+    use deepbook::custodian_v2::{Self, AccountCap};
+    use sui::coin::{Self, Coin};
+    use sui::sui::SUI;
+    
+    struct USDC has drop {}
+    
+    public fun init_and_trade(
+        pool: &mut Pool<SUI, USDC>,
+        sui_payment: Coin<SUI>,
+        clock: &Clock,
+        ctx: &mut TxContext
+    ) {
+        // Create account if needed
+        let account_cap = custodian_v2::create_account(ctx);
+        
+        // Execute market order
+        let (remaining_sui, usdc) = clob_v2::place_market_order(
+            pool,
+            coin::value(&sui_payment),
+            true,
+            sui_payment,
+            coin::zero<USDC>(ctx),
+            clock,
+            ctx
+        );
+        
+        // Transfer results
+        transfer::public_transfer(usdc, tx_context::sender(ctx));
+        transfer::public_transfer(remaining_sui, tx_context::sender(ctx));
+        transfer::public_transfer(account_cap, tx_context::sender(ctx));
+    }
+}
+```
+
+## Resources
+
+- [DeepBook Documentation](https://docs.sui.io/standards/deepbook)
+- [DeepBook Source Code](https://github.com/MystenLabs/sui/tree/main/crates/sui-framework/packages/deepbook)
+- [Trading Examples](https://github.com/MystenLabs/sui/tree/main/crates/sui-framework/packages/deepbook/tests)

@@ -1,0 +1,497 @@
+---
+title: Staking and Rewards
+description: Understanding staking mechanics, reward distribution, and commission structure for Sui validators.
+---
+
+Sui's proof-of-stake system allows validators to earn rewards for securing the network. This guide explains staking mechanics, reward calculations, and commission management.
+
+## Staking Overview
+
+Sui uses a delegated proof-of-stake (DPoS) mechanism where:
+
+- **Validators** operate nodes and participate in consensus
+- **Delegators** stake SUI tokens with validators
+- **Rewards** are distributed based on stake and performance
+- **Epochs** define reward distribution periods (24 hours on mainnet)
+
+## Validator Stake
+
+### Stake Components
+
+Validator stake consists of:
+
+1. **Self-stake**: Validator's own SUI tokens
+2. **Delegated stake**: SUI delegated by token holders
+3. **Total stake**: Self-stake + delegated stake
+
+### Minimum Stake Requirements
+
+To join the active validator set:
+
+```bash
+# Query minimum stake
+sui client call --package 0x3 --module sui_system --function get_min_validator_stake --args 0x5
+```
+
+Typical requirements:
+- **Mainnet**: ~30 million SUI
+- **Testnet**: ~1 million SUI
+
+<Note>
+  Minimum stake requirements may change through governance. Always verify current requirements before attempting to join.
+</Note>
+
+### Checking Validator Stake
+
+View your validator's stake:
+
+```bash
+# Display validator metadata
+sui validator display-metadata
+
+# Or check specific validator
+sui validator display-metadata <validator-address>
+```
+
+Through RPC:
+
+```bash
+curl -X POST http://localhost:9000 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getValidatorsApy",
+    "params": []
+  }'
+```
+
+## Reward Mechanisms
+
+### Reward Sources
+
+Validators earn rewards from:
+
+1. **Computation fees**: Gas fees from transaction execution
+2. **Storage fees**: Fees for on-chain data storage
+3. **Stake subsidies**: Network-issued rewards (decreases over time)
+
+### Reward Calculation
+
+Rewards are calculated based on:
+
+```
+Validator Rewards = (Stake Weight × Base Rewards) + Performance Bonus
+
+Where:
+- Stake Weight = Validator Stake / Total Network Stake
+- Base Rewards = Epoch rewards from fees and subsidies
+- Performance Bonus = Additional rewards for high participation
+```
+
+### Epoch-Based Distribution
+
+Rewards are distributed at epoch boundaries:
+
+- **Epoch duration**: 24 hours (mainnet), varies on testnet
+- **Distribution time**: Automatic at epoch change
+- **Claiming**: Rewards are automatically compounded
+
+## Commission Structure
+
+### Setting Commission Rate
+
+Validators charge commission on delegated stake rewards:
+
+```bash
+# Set commission rate (in basis points)
+# 200 basis points = 2%
+sui validator update-metadata --commission-rate 200
+```
+
+**Commission range**: 0-10,000 basis points (0-100%)
+
+### Commission Calculation
+
+Commission is calculated on delegator rewards:
+
+```
+Delegator Gross Rewards = (Delegated Stake / Total Stake) × Epoch Rewards
+Validator Commission = Delegator Gross Rewards × Commission Rate
+Delegator Net Rewards = Delegator Gross Rewards - Validator Commission
+
+Validator Total Rewards = Self-Stake Rewards + Commission
+```
+
+**Example**:
+```
+Epoch rewards: 10,000 SUI
+Validator stake: 50M SUI total
+- Self-stake: 5M SUI
+- Delegated: 45M SUI
+Commission: 5%
+
+Self-stake rewards: (5M/50M) × 10,000 = 1,000 SUI
+Delegated stake rewards: (45M/50M) × 10,000 = 9,000 SUI
+Commission: 9,000 × 5% = 450 SUI
+
+Validator receives: 1,000 + 450 = 1,450 SUI
+Delegators receive: 9,000 - 450 = 8,550 SUI (split among delegators)
+```
+
+### Updating Commission
+
+For active validators:
+
+```bash
+# Request commission rate change
+sui client call --package 0x3 --module sui_system \
+  --function request_set_commission_rate \
+  --args 0x5 <new_rate>
+```
+
+For validator candidates:
+
+```bash
+# Set commission rate for candidates
+sui client call --package 0x3 --module sui_system \
+  --function set_candidate_validator_commission_rate \
+  --args 0x5 <new_rate>
+```
+
+<Warning>
+  Commission changes for active validators take effect in the next epoch. Communicate changes to delegators in advance.
+</Warning>
+
+## Delegation Management
+
+### Accepting Delegation
+
+As a validator candidate or active validator, you automatically accept delegations. Delegators can stake with you through:
+
+- Sui Wallet
+- CLI commands
+- dApps and exchanges
+
+### Delegation Flow
+
+1. **Delegator stakes** SUI with your validator
+2. **Stake activates** at next epoch boundary
+3. **Rewards accrue** each epoch
+4. **Auto-compounding**: Rewards are automatically re-staked
+
+### Maximum Delegations
+
+There is no maximum delegation amount. However:
+
+- Higher total stake increases validator rewards
+- Very high stake may require more resources
+- Voting power is capped to prevent centralization
+
+## Gas Price Oracle
+
+Validators participate in the gas price oracle by submitting quotes:
+
+### Setting Gas Price Quote
+
+```bash
+# Update gas price quote
+sui validator update-gas-price <price>
+
+# With operation cap (if delegated)
+sui validator update-gas-price \
+  --operation-cap-id <cap-object-id> \
+  <price>
+```
+
+The reference gas price is calculated as the median of all validator quotes, weighted by stake.
+
+### Gas Price Considerations
+
+- **Too low**: May not cover operational costs
+- **Too high**: Reduces network competitiveness
+- **Market-based**: Monitor network conditions and adjust
+
+**Typical gas prices**:
+- Mainnet: 750-1,000 MIST
+- Testnet: 1,000 MIST
+
+## Reward Monitoring
+
+### Tracking Validator Rewards
+
+Query validator rewards:
+
+```bash
+# View validator metadata (includes rewards info)
+sui validator display-metadata
+
+# Check epoch information
+curl -X POST http://localhost:9000 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getLatestSuiSystemState",
+    "params": []
+  }' | jq '.result.epochRewards'
+```
+
+### Validator APY
+
+Check annual percentage yield:
+
+```bash
+curl -X POST http://localhost:9000 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getValidatorsApy",
+    "params": []
+  }'
+```
+
+View on explorers:
+- [Suiscan Validators](https://suiscan.xyz/mainnet/validators)
+- [SuiVision Validators](https://suivision.xyz/validators)
+
+### Reward History
+
+Track historical performance:
+
+```bash
+# Query events for validator
+sui client events --query '{"MoveEventType":"0x3::validator::StakingRewardsEvent"}'
+```
+
+## Performance Impact on Rewards
+
+### Participation Requirements
+
+Validators must:
+
+- **Maintain uptime**: >99% availability
+- **Participate in consensus**: Vote on blocks
+- **Process transactions**: Execute transactions correctly
+- **Stay synced**: Keep up with network checkpoints
+
+### Performance Penalties
+
+**Poor performance results in**:
+
+1. **Reduced rewards**: Missing consensus rounds reduces epoch rewards
+2. **Tallying score impact**: Low participation affects validator score
+3. **Risk of slashing**: Byzantine behavior may result in stake slashing
+4. **Reputation damage**: Delegators may withdraw stake
+
+### Slashing Conditions
+
+Validators can be slashed for:
+
+- **Equivocation**: Signing conflicting messages
+- **Byzantine behavior**: Malicious actions reported by 2f+1 validators
+- **Protocol violations**: Breaking consensus rules
+
+**Slashing process**:
+
+```bash
+# Validators report misbehavior
+sui validator report-validator <offender-address>
+
+# If 2f+1 validators report, slashing occurs automatically
+```
+
+## Operation Cap
+
+### What is Operation Cap?
+
+Operation Cap is a capability object that allows delegating validator operations:
+
+- **Update gas price**: Without using validator account key
+- **Report validators**: Submit peer reports
+- **Operational flexibility**: Separate hot/cold key management
+
+### Managing Operation Cap
+
+**Check current Operation Cap**:
+
+```bash
+sui client objects --owner <validator-address>
+# Look for UnverifiedValidatorOperationCap object
+```
+
+**Transfer Operation Cap** to operator account:
+
+```bash
+sui client transfer \
+  --object-id <operation-cap-id> \
+  --to <operator-address>
+```
+
+**Rotate Operation Cap** (invalidate current, create new):
+
+```bash
+sui client call --package 0x3 --module sui_system \
+  --function rotate_operation_cap \
+  --args 0x5
+```
+
+<Warning>
+  Rotating Operation Cap immediately invalidates the old cap. Ensure you're ready to use the new cap before rotating.
+</Warning>
+
+## Withdrawal and Unstaking
+
+### Delegator Unstaking
+
+Delegators can unstake at any time:
+
+- Unstake request submitted
+- Stake remains active until next epoch
+- Funds available after epoch boundary
+
+### Validator Leaving
+
+To remove your validator:
+
+```bash
+# Request removal from validator set
+sui validator leave-committee
+```
+
+**Process**:
+1. Submit leave request
+2. Remain active until next epoch
+3. Removed from active set at epoch boundary
+4. Staking pool becomes inactive
+5. Delegators can withdraw stake
+
+### Reactivating Validator
+
+After leaving, to rejoin:
+
+```bash
+# Must have minimum stake
+sui validator join-committee
+```
+
+Reactivation occurs at next epoch boundary.
+
+## Best Practices
+
+### For Validators
+
+1. **Competitive commission**: Research market rates (typically 2-10%)
+2. **Transparent communication**: Announce changes in advance
+3. **High uptime**: Maintain >99.5% availability
+4. **Regular updates**: Keep node software current
+5. **Performance monitoring**: Track participation metrics
+6. **Delegator relations**: Build trust through reliability
+
+### For Delegators
+
+When choosing validators, consider:
+
+1. **Performance history**: Check uptime and participation
+2. **Commission rate**: Balance cost with validator quality
+3. **Total stake**: Ensure validator meets minimum
+4. **Reputation**: Research validator's track record
+5. **Communication**: Active, transparent operators
+
+## Reward Optimization
+
+### Maximizing Validator Rewards
+
+**Strategies**:
+
+1. **Maintain high uptime**: Participate in all consensus rounds
+2. **Optimize commission**: Attract delegation without reducing profitability
+3. **Build reputation**: Transparent communication and reliable operation
+4. **Marketing**: Promote validator to attract delegators
+5. **Performance**: Ensure infrastructure meets demands
+
+### Cost-Benefit Analysis
+
+**Monthly costs** (example):
+```
+Infrastructure: $3,000
+Personnel: $5,000
+Other: $500
+Total: $8,500/month = $102,000/year
+```
+
+**Revenue** (example):
+```
+Stake: 50M SUI
+APY: 3%
+Self-stake (10%): 5M × 3% = 150,000 SUI
+Commission (5%): 45M × 3% × 5% = 67,500 SUI
+Total: 217,500 SUI/year
+
+At $1/SUI: $217,500 revenue
+Profit: $217,500 - $102,000 = $115,500
+```
+
+<Note>
+  Actual rewards vary based on network conditions, validator performance, and total network stake. This is a simplified example.
+</Note>
+
+## Governance Participation
+
+Validators participate in network governance:
+
+### Voting Power
+
+Based on total stake (self-stake + delegated):
+
+```
+Voting Power = Validator Stake / Total Network Stake
+```
+
+### Governance Rewards
+
+Participating in governance may provide:
+
+- Additional rewards for voting
+- Influence over protocol parameters
+- Say in network upgrades
+
+## Tax and Accounting
+
+### Record Keeping
+
+Maintain records of:
+
+- Epoch rewards received
+- Commission earned
+- Operating expenses
+- Stake changes
+- Commission rate changes
+
+### Tax Considerations
+
+<Warning>
+  Consult with tax professionals. Staking rewards may be taxable income in many jurisdictions.
+</Warning>
+
+Considerations:
+
+- Rewards may be taxable when received
+- Commission is typically ordinary income
+- Operating costs may be deductible
+- Jurisdiction-specific regulations apply
+
+## Resources
+
+### Tools and Dashboards
+
+- [Suiscan Validators](https://suiscan.xyz/mainnet/validators)
+- [SuiVision Validators](https://suivision.xyz/validators)
+- [Sui Metrics Dashboard](https://metrics.sui.io)
+
+### Documentation
+
+- [Validator Operations](/operators/validator-operations)
+- [Committee Management](/operators/committee-management)
+- [System Requirements](/operators/system-requirements)

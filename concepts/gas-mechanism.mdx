@@ -1,0 +1,263 @@
+---
+title: Gas Mechanism Details
+description: Deep dive into Sui's gas mechanism, including computation costs, storage fees, and economic incentives.
+---
+
+Sui's gas mechanism is designed to be transparent, predictable, and sustainable. It separates computation costs from storage costs and implements a storage rebate system for long-term sustainability.
+
+## Gas Model Overview
+
+Sui uses a two-dimensional gas model:
+
+<CardGroup cols={2}>
+  <Card title="Computation Gas" icon="microchip">
+    Pay for CPU and network resources used during execution
+  </Card>
+  <Card title="Storage Gas" icon="database">
+    Pay for on-chain storage of data
+  </Card>
+</CardGroup>
+
+## Gas Cost Formula
+
+```rust filename="crates/sui-types/src/gas.rs"
+pub struct GasCostSummary {
+    /// Cost of computation/execution
+    pub computation_cost: u64,
+    /// Storage cost, it's the sum of all storage cost for all objects created or mutated
+    pub storage_cost: u64,
+    /// The amount of storage cost refunded to the user for all objects deleted or mutated
+    pub storage_rebate: u64,
+    /// The fee for the rebate. The portion of the storage rebate kept by the system
+    pub non_refundable_storage_fee: u64,
+}
+```
+
+Total cost:
+```
+Total = computation_cost + storage_cost - storage_rebate
+```
+
+## Computation Gas
+
+Charged for:
+- Move bytecode execution
+- Native function calls
+- Object reads and writes
+- Event emissions
+- Transaction processing overhead
+
+### Gas Units
+
+Typical operations:
+
+```rust filename="crates/sui-types/src/transaction.rs"
+pub const TEST_ONLY_GAS_UNIT_FOR_TRANSFER: u64 = 10_000;
+pub const TEST_ONLY_GAS_UNIT_FOR_OBJECT_BASICS: u64 = 50_000;
+pub const TEST_ONLY_GAS_UNIT_FOR_PUBLISH: u64 = 70_000;
+pub const TEST_ONLY_GAS_UNIT_FOR_STAKING: u64 = 50_000;
+pub const TEST_ONLY_GAS_UNIT_FOR_GENERIC: u64 = 50_000;
+pub const TEST_ONLY_GAS_UNIT_FOR_SPLIT_COIN: u64 = 10_000;
+```
+
+## Storage Gas
+
+### Storage Pricing
+
+Storage cost is calculated as:
+
+```
+storage_cost = object_size_bytes × storage_price_per_byte
+```
+
+The storage price per byte is set by the protocol and adjusts based on network conditions.
+
+### Storage Rebate
+
+When you delete or modify an object:
+
+```move filename="crates/sui-framework/packages/sui-system/sources/storage_fund.move"
+public(package) fun advance_epoch(
+    self: &mut StorageFund,
+    storage_charges: Balance<SUI>,
+    storage_fund_reinvestment: Balance<SUI>,
+    leftover_staking_rewards: Balance<SUI>,
+    storage_rebate_amount: u64,
+    non_refundable_storage_fee_amount: u64,
+): Balance<SUI> {
+    // Process epoch storage economics
+    self.non_refundable_balance.join(storage_fund_reinvestment);
+    self.non_refundable_balance.join(leftover_staking_rewards);
+    self.total_object_storage_rebates.join(storage_charges);
+
+    // Split out non-refundable portion
+    let non_refundable_storage_fee = self
+        .total_object_storage_rebates
+        .split(non_refundable_storage_fee_amount);
+    
+    self.non_refundable_balance.join(non_refundable_storage_fee);
+
+    // Return refundable portion
+    let storage_rebate = self.total_object_storage_rebates.split(storage_rebate_amount);
+    storage_rebate
+}
+```
+
+<Note>
+  The storage rebate is not a full refund. A small percentage (non-refundable fee) is kept by the system to fund long-term storage.
+</Note>
+
+## Gas Smearing
+
+Gas costs are "smeared" to prevent MEV opportunities:
+
+```rust filename="crates/sui-types/src/gas.rs"
+pub trait SuiGasStatusAPI {
+    fn bucketize_computation(&mut self, aborted: Option<bool>) -> Result<(), ExecutionError>;
+    // ...
+}
+```
+
+This rounds gas costs to prevent micro-optimizations that could create unfair advantages.
+
+## Reference Gas Price (RGP)
+
+Validators vote on the reference gas price each epoch:
+
+```rust filename="crates/sui-types/src/transaction.rs"
+pub const DEFAULT_VALIDATOR_GAS_PRICE: u64 = 1000;
+```
+
+Transactions must have `gas_price >= RGP`:
+
+```rust filename="crates/sui-types/src/gas.rs"
+pub fn new(
+    gas_budget: u64,
+    gas_price: u64,
+    reference_gas_price: u64,
+    config: &ProtocolConfig,
+) -> SuiResult<Self> {
+    if gas_price < reference_gas_price {
+        return Err(UserInputError::GasPriceUnderRGP {
+            gas_price,
+            reference_gas_price,
+        }
+        .into());
+    }
+    // ...
+}
+```
+
+## Gas Budget
+
+Every transaction specifies a maximum gas budget:
+
+```typescript
+const tx = new Transaction();
+tx.setGasBudget(10_000_000); // 10M gas units
+```
+
+### Budget Enforcement
+
+- Transaction aborts if gas budget is exceeded
+- Gas used up to abort point is still charged
+- Prevents runaway computation
+
+## Gas Optimizations
+
+### Coin-Specific Optimizations
+
+```rust filename="crates/sui-types/src/object.rs"
+/// Return the `value: u64` field of a `Coin<T>` type.
+/// Useful for reading the coin without deserializing the object into a Move value
+pub fn get_coin_value_unsafe(&self) -> u64 {
+    debug_assert!(self.type_.is_coin());
+    // 32 bytes for object ID, 8 for balance
+    debug_assert!(self.contents.len() == 40);
+    u64::from_le_bytes(<[u8; 8]>::try_from(&self.contents[ID_END_INDEX..]).unwrap())
+}
+
+/// Update the `value: u64` field of a `Coin<T>` type.
+pub fn set_coin_value_unsafe(&mut self, value: u64) {
+    debug_assert!(self.type_.is_coin());
+    self.contents.splice(ID_END_INDEX.., value.to_le_bytes());
+}
+```
+
+Coins have fixed 40-byte layout enabling direct balance access without full deserialization.
+
+### Storage Read Charges
+
+```rust filename="crates/sui-types/src/gas.rs"
+pub trait SuiGasStatusAPI {
+    fn charge_storage_read(&mut self, size: usize) -> Result<(), ExecutionError>;
+    fn charge_publish_package(&mut self, size: usize) -> Result<(), ExecutionError>;
+}
+```
+
+Reading objects incurs a small gas cost based on size.
+
+## Economic Incentives
+
+### For Users
+
+<AccordionGroup>
+  <Accordion title="Delete unused objects">
+    Recover storage rebates by cleaning up:
+    
+    ```move
+    public fun cleanup(temp: TempObject) {
+        let TempObject { id, .. } = temp;
+        id.delete(); // Get storage rebate
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Minimize object size">
+    ```move
+    // Bad: Large object
+    public struct BadNFT has key {
+        id: UID,
+        full_image: vector<u8>, // 10 MB!
+    }
+    
+    // Good: Lean object
+    public struct GoodNFT has key {
+        id: UID,
+        image_url: String, // Just URL
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Batch operations">
+    ```typescript
+    // One transaction with multiple operations is cheaper
+    const tx = new Transaction();
+    recipients.forEach(r => {
+        const [coin] = tx.splitCoins(tx.gas, [amount]);
+        tx.transferObjects([coin], r);
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### For Validators
+
+Validators earn:
+- Gas fees from transactions
+- Storage fees from object creation
+- Staking rewards
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="Gas Pricing" href="/concepts/gas-pricing" icon="tag">
+    Gas pricing details
+  </Card>
+  <Card title="Storage Fund" href="/concepts/storage-fund" icon="vault">
+    Storage economics
+  </Card>
+  <Card title="SUI Token" href="/concepts/sui-token" icon="coins">
+    Learn about SUI
+  </Card>
+</CardGroup>

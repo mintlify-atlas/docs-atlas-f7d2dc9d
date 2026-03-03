@@ -1,0 +1,488 @@
+---
+title: Node Configuration
+description: Comprehensive guide to configuring Sui nodes with all available options and environment variables.
+---
+
+Sui nodes are configured using a YAML configuration file. This guide covers all available configuration options.
+
+## Configuration File Structure
+
+The node configuration file is passed to sui-node via the `--config-path` flag:
+
+```bash
+sui-node --config-path /opt/sui/config/validator.yaml
+```
+
+## Core Configuration
+
+### Key Pairs
+
+Validators require four key pairs:
+
+```yaml
+protocol-key-pair:
+  path: /opt/sui/key-pairs/protocol.key
+worker-key-pair:
+  path: /opt/sui/key-pairs/worker.key
+network-key-pair:
+  path: /opt/sui/key-pairs/network.key
+account-key-pair:
+  path: /opt/sui/key-pairs/account.key
+```
+
+Fullnodes do not require these keys but must generate a network key pair.
+
+### Database Paths
+
+```yaml
+# Main database path
+db-path: /opt/sui/db/authorities_db
+
+# Consensus database (validators only)
+consensus-config:
+  db-path: /opt/sui/db/consensus_db
+```
+
+The actual database is stored at `{db-path}/live/`. Snapshots and archives are stored in subdirectories.
+
+### Network Addresses
+
+```yaml
+# Protocol and transaction interface
+network-address: /ip4/0.0.0.0/tcp/8080/http
+
+# Metrics endpoint
+metrics-address: 0.0.0.0:9184
+
+# JSON-RPC endpoint
+json-rpc-address: 0.0.0.0:9000
+
+# Admin interface port
+admin-interface-port: 1337
+```
+
+**Default ports:**
+- Network address: 8080 (TCP)
+- Metrics: 9184 (TCP, localhost only)
+- JSON-RPC: 9000 (TCP)
+- Admin interface: 1337 (TCP, localhost only)
+
+## P2P Configuration
+
+Peer-to-peer networking configuration:
+
+```yaml
+p2p-config:
+  # Address to bind for P2P communication
+  listen-address: 0.0.0.0:8084
+  
+  # External address advertised to peers
+  external-address: /dns/validator.example.com/udp/8084
+  
+  # Seed peers for bootstrapping
+  seed-peers:
+    - address: /dns/peer1.sui.io/udp/8084
+      peer-id: 0x1234...  # hex encoded network public key
+    - address: /dns/peer2.sui.io/udp/8084
+      peer-id: 0x5678...
+  
+  # Anemo network configuration
+  anemo-config:
+    # Maximum concurrent connections (0 = unlimited for validators)
+    max-concurrent-connections: 0
+  
+  # State sync configuration
+  state-sync:
+    # Query interval for checkpoints (milliseconds)
+    interval-period-ms: 5000
+    
+    # Checkpoint header download concurrency
+    checkpoint-header-download-concurrency: 400
+    
+    # Checkpoint content download concurrency
+    checkpoint-content-download-concurrency: 400
+    
+    # Timeout for state sync RPC requests (milliseconds)
+    timeout-ms: 10000
+    
+    # Maximum checkpoint lookahead
+    max-checkpoint-lookahead: 1000
+```
+
+### State Sync Advanced Options
+
+```yaml
+p2p-config:
+  state-sync:
+    # Mailbox capacity
+    mailbox-capacity: 1024
+    
+    # Broadcast channel capacity
+    synced-checkpoint-broadcast-channel-capacity: 1024
+    
+    # Transaction download concurrency
+    checkpoint-content-download-tx-concurrency: 50000
+    
+    # Adaptive timeout bounds
+    checkpoint-content-timeout-min-ms: 5000
+    checkpoint-content-timeout-max-ms: 30000
+    
+    # Peer scoring
+    peer-scoring-window-ms: 60000
+    exploration-probability: 0.1
+    peer-failure-rate: 0.3
+```
+
+## Consensus Configuration (Validators Only)
+
+```yaml
+consensus-config:
+  # Database path
+  db-path: /opt/sui/db/consensus_db
+  
+  # Number of epochs to retain consensus DBs
+  db-retention-epochs: 0
+  
+  # DB pruner period (seconds)
+  db-pruner-period-secs: 3600
+  
+  # Maximum pending transactions
+  max-pending-transactions: 20000
+  
+  # Override listen address (optional)
+  listen-address: /ip4/0.0.0.0/tcp/8081
+  
+  # External address for consensus (optional)
+  external-address: /dns/validator.example.com/tcp/8081
+  
+  # Consensus parameters (optional)
+  parameters:
+    # Advanced consensus tuning parameters
+```
+
+## Genesis Configuration
+
+```yaml
+genesis:
+  # Path to genesis blob
+  genesis-file-location: /opt/sui/config/genesis.blob
+```
+
+Download genesis blobs from:
+- Mainnet: `https://github.com/MystenLabs/sui-genesis/raw/main/mainnet/genesis.blob`
+- Testnet: `https://github.com/MystenLabs/sui-genesis/raw/main/testnet/genesis.blob`
+
+## Pruning Configuration
+
+```yaml
+authority-store-pruning-config:
+  # Number of latest epoch DBs to retain
+  num-latest-epoch-dbs-to-retain: 3
+  
+  # Epoch DB pruning period (seconds)
+  epoch-db-pruning-period-secs: 3600
+  
+  # Number of epochs to retain object data (0 = aggressive pruning)
+  num-epochs-to-retain: 0
+  
+  # Number of epochs to retain checkpoint data (minimum 2)
+  num-epochs-to-retain-for-checkpoints: 2
+  
+  # Pruning run delay (seconds)
+  pruning-run-delay-seconds: 60
+  
+  # Maximum checkpoints per pruning batch
+  max-checkpoints-in-batch: 10
+  
+  # Maximum transactions per pruning batch
+  max-transactions-in-batch: 1000
+  
+  # Enable smooth pruning
+  smooth: true
+  
+  # Periodic compaction threshold (days)
+  periodic-compaction-threshold-days: 1
+```
+
+<Warning>
+  Setting `num-epochs-to-retain: 0` enables aggressive pruning mode. This is experimental and should be used with caution on validators.
+</Warning>
+
+## Checkpoint Executor Configuration
+
+```yaml
+checkpoint-executor-config:
+  # Maximum concurrent checkpoint execution
+  checkpoint-execution-max-concurrency: 200
+  
+  # Local execution timeout (seconds)
+  local-execution-timeout-sec: 10
+  
+  # Data ingestion directory (optional)
+  data-ingestion-dir: /opt/sui/data-ingestion
+```
+
+## RPC Configuration
+
+```yaml
+# JSON-RPC server type
+jsonrpc-server-type: http  # Options: http, websocket, both
+
+# Enable event processing for fullnodes
+enable-event-processing: true
+
+# Enable index processing
+enable-index-processing: false  # Set to true for fullnodes
+
+# Disable dev-inspect (optional)
+dev-inspect-disabled: false
+
+# RPC-specific settings
+rpc:
+  # Maximum request payload size
+  max-request-payload-size: 2097152  # 2 MB
+  
+  # Maximum response payload size
+  max-response-payload-size: 2097152  # 2 MB
+  
+  # Maximum number of subscriptions
+  max-subscriptions-per-connection: 100
+```
+
+## Metrics Configuration
+
+```yaml
+metrics:
+  # Push interval for metrics (seconds)
+  push-interval-seconds: 60
+  
+  # Metrics proxy URL for validators
+  push-url: https://metrics-proxy.mainnet.sui.io:8443/publish/metrics
+```
+
+Metrics are available locally at `http://localhost:9184/metrics`.
+
+## State Archive Configuration
+
+```yaml
+state-archive-read-config:
+  # Archive ingestion URL
+  - ingestion-url: https://checkpoints.mainnet.sui.io
+    concurrency: 5
+    remote-store-options:
+      - ["aws_region", "us-west-2"]
+```
+
+Use:
+- Mainnet: `https://checkpoints.mainnet.sui.io`
+- Testnet: `https://checkpoints.testnet.sui.io`
+
+## Execution Cache Configuration
+
+```yaml
+execution-cache:
+  # Use writeback cache (recommended)
+  writeback-cache:
+    # Maximum cache size
+    max-cache-size: 100000
+    
+    # Cache sizes for specific types
+    package-cache-size: 1000
+    object-cache-size: 100000
+    transaction-cache-size: 100000
+    
+    # Backpressure thresholds
+    backpressure-threshold: 100000
+    backpressure-threshold-for-rpc: 100000
+```
+
+## Environment Variables
+
+Key environment variables override config file settings:
+
+### Logging
+
+```bash
+# Log level configuration
+RUST_LOG="info,sui_core=debug,consensus=debug,jsonrpsee=error"
+
+# Enable JSON logging
+RUST_LOG_JSON=1
+
+# Enable backtraces
+RUST_BACKTRACE=1
+RUST_BACKTRACE=full  # Full backtraces
+```
+
+### Database
+
+```bash
+# Enable fsync for durability
+SUI_DB_SYNC_TO_DISK=true
+
+# Enable write stall (validators: true, fullnodes: false)
+SUI_ENABLE_DB_WRITE_STALL=true
+```
+
+### Cache Sizing
+
+```bash
+SUI_MAX_CACHE_SIZE=100000
+SUI_PACKAGE_CACHE_SIZE=1000
+SUI_OBJECT_CACHE_SIZE=100000
+SUI_TRANSACTION_CACHE_SIZE=100000
+SUI_BACKPRESSURE_THRESHOLD=100000
+```
+
+## Advanced Configuration
+
+### Traffic Control
+
+```yaml
+policy-config:
+  # Connection blocking policy
+  connection-blocklist-ttl-sec: 3600
+  
+  # Proxy score threshold
+  proxy-score-threshold: 0.5
+
+firewall-config:
+  # Remote firewall configuration URL
+  remote-fw-url: https://firewall.sui.io/rules
+```
+
+### Transaction Validation
+
+```yaml
+transaction-deny-config:
+  # List of denied transaction digests
+  # Not recommended for general use
+```
+
+### DB Checkpointing
+
+```yaml
+db-checkpoint-config:
+  # Create DB checkpoints at epoch end
+  perform-db-checkpoints-at-epoch-end: false
+  
+  # Checkpoint path
+  checkpoint-path: /opt/sui/db/db_checkpoints
+  
+  # Object store config for uploads
+  object-store-config:
+    # S3/GCS configuration
+```
+
+## Complete Validator Example
+
+```yaml
+protocol-key-pair:
+  path: /opt/sui/key-pairs/protocol.key
+worker-key-pair:
+  path: /opt/sui/key-pairs/worker.key
+network-key-pair:
+  path: /opt/sui/key-pairs/network.key
+account-key-pair:
+  path: /opt/sui/key-pairs/account.key
+
+db-path: /opt/sui/db/authorities_db
+network-address: /ip4/0.0.0.0/tcp/8080/http
+metrics-address: 0.0.0.0:9184
+admin-interface-port: 1337
+json-rpc-address: 0.0.0.0:9000
+
+consensus-config:
+  db-path: /opt/sui/db/consensus_db
+  db-retention-epochs: 0
+  max-pending-transactions: 20000
+
+p2p-config:
+  listen-address: 0.0.0.0:8084
+  external-address: /dns/validator.example.com/udp/8084
+  anemo-config:
+    max-concurrent-connections: 0
+
+genesis:
+  genesis-file-location: /opt/sui/config/genesis.blob
+
+enable-index-processing: false
+
+authority-store-pruning-config:
+  num-latest-epoch-dbs-to-retain: 3
+  num-epochs-to-retain: 0
+  num-epochs-to-retain-for-checkpoints: 2
+  epoch-db-pruning-period-secs: 3600
+  max-checkpoints-in-batch: 10
+  max-transactions-in-batch: 1000
+
+checkpoint-executor-config:
+  checkpoint-execution-max-concurrency: 200
+  local-execution-timeout-sec: 10
+
+metrics:
+  push-interval-seconds: 60
+  push-url: https://metrics-proxy.mainnet.sui.io:8443/publish/metrics
+
+execution-cache:
+  writeback-cache:
+    max-cache-size: 100000
+    backpressure-threshold: 100000
+```
+
+## Complete Fullnode Example
+
+```yaml
+db-path: /opt/sui/db
+
+network-address: /ip4/0.0.0.0/tcp/8080/http
+metrics-address: 0.0.0.0:9184
+json-rpc-address: 0.0.0.0:9000
+enable-event-processing: true
+
+p2p-config:
+  listen-address: 0.0.0.0:8084
+
+genesis:
+  genesis-file-location: /opt/sui/config/genesis.blob
+
+authority-store-pruning-config:
+  num-latest-epoch-dbs-to-retain: 3
+  epoch-db-pruning-period-secs: 3600
+  num-epochs-to-retain: 1
+  max-checkpoints-in-batch: 10
+  max-transactions-in-batch: 1000
+  pruning-run-delay-seconds: 60
+
+state-archive-read-config:
+  - ingestion-url: https://checkpoints.mainnet.sui.io
+    concurrency: 5
+```
+
+## Configuration Validation
+
+Validate your configuration before starting the node:
+
+```bash
+# Test configuration loading
+sui-node --config-path validator.yaml --help
+
+# Check for syntax errors
+yamllint validator.yaml
+```
+
+## Dynamic Configuration
+
+Some settings can be changed at runtime via the admin interface:
+
+### Update Log Levels
+
+```bash
+# View current log level
+curl localhost:1337/logging
+
+# Change log level
+curl localhost:1337/logging -d "info,sui_core=debug"
+```
+
+The admin interface is available on `localhost:1337` by default.

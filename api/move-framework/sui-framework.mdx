@@ -1,0 +1,470 @@
+---
+title: Sui Framework
+description: Core Move modules for building on Sui
+---
+
+The Sui Framework provides core modules for building Move applications on Sui. These modules are published at address `0x2` and provide fundamental functionality.
+
+## Core Modules
+
+### object.move
+
+Defines Sui's object model and provides functions for object operations.
+
+**Key Types:**
+- `UID` - Unique identifier for objects
+- `ID` - Reference to an object's UID
+
+**Key Functions:**
+```move
+// Create new UID
+public fun new(ctx: &mut TxContext): UID
+
+// Delete UID (consumes the object)
+public fun delete(id: UID)
+
+// Get object ID
+public fun uid_to_inner(uid: &UID): ID
+
+// Get object address
+public fun uid_to_address(uid: &UID): address
+
+// Borrow UID mutably
+public fun borrow_id<T: key>(obj: &T): &ID
+```
+
+**Example:**
+```move
+use sui::object::{Self, UID};
+use sui::tx_context::TxContext;
+
+struct MyObject has key {
+    id: UID,
+    value: u64,
+}
+
+public fun create(ctx: &mut TxContext): MyObject {
+    MyObject {
+        id: object::new(ctx),
+        value: 0,
+    }
+}
+```
+
+---
+
+### coin.move
+
+Defines the `Coin` type and provides functions for working with fungible tokens.
+
+**Key Types:**
+- `Coin<T>` - A coin of type T
+- `TreasuryCap<T>` - Capability to mint/burn coins
+- `CoinMetadata<T>` - Metadata for a coin type
+
+**Key Functions:**
+```move
+// Get coin value
+public fun value<T>(coin: &Coin<T>): u64
+
+// Split coin
+public fun split<T>(coin: &mut Coin<T>, amount: u64, ctx: &mut TxContext): Coin<T>
+
+// Join coins
+public fun join<T>(coin: &mut Coin<T>, other: Coin<T>)
+
+// Take from coin
+public fun take<T>(balance: &mut Balance<T>, value: u64, ctx: &mut TxContext): Coin<T>
+
+// Put coin into balance
+public fun put<T>(balance: &mut Balance<T>, coin: Coin<T>)
+
+// Mint new coins (requires TreasuryCap)
+public fun mint<T>(cap: &mut TreasuryCap<T>, value: u64, ctx: &mut TxContext): Coin<T>
+
+// Burn coins (requires TreasuryCap)
+public fun burn<T>(cap: &mut TreasuryCap<T>, coin: Coin<T>): u64
+```
+
+**Example:**
+```move
+use sui::coin::{Self, Coin};
+use sui::sui::SUI;
+
+public fun split_and_transfer(
+    coin: &mut Coin<SUI>,
+    amount: u64,
+    recipient: address,
+    ctx: &mut TxContext
+) {
+    let split_coin = coin::split(coin, amount, ctx);
+    transfer::public_transfer(split_coin, recipient);
+}
+```
+
+---
+
+### transfer.move
+
+Provides functions for transferring objects between addresses.
+
+**Key Functions:**
+```move
+// Transfer object with public transfer
+public fun public_transfer<T: key + store>(obj: T, recipient: address)
+
+// Transfer object (requires custom transfer policy)
+public fun transfer<T: key>(obj: T, recipient: address)
+
+// Share object (make it shared)
+public fun public_share_object<T: key>(obj: T)
+
+// Share object with initial version tracking
+public fun share_object<T: key>(obj: T)
+
+// Freeze object (make it immutable)
+public fun public_freeze_object<T: key>(obj: T)
+
+// Freeze object
+public fun freeze_object<T: key>(obj: T)
+```
+
+**Example:**
+```move
+use sui::transfer;
+
+public fun create_and_transfer(recipient: address, ctx: &mut TxContext) {
+    let obj = MyObject {
+        id: object::new(ctx),
+        value: 100,
+    };
+    transfer::transfer(obj, recipient);
+}
+
+public fun create_shared(ctx: &mut TxContext) {
+    let shared_obj = SharedObject {
+        id: object::new(ctx),
+        counter: 0,
+    };
+    transfer::share_object(shared_obj);
+}
+```
+
+---
+
+### tx_context.move
+
+Provides transaction context information.
+
+**Key Functions:**
+```move
+// Get transaction sender
+public fun sender(ctx: &TxContext): address
+
+// Get transaction digest
+public fun digest(ctx: &TxContext): &vector<u8>
+
+// Get current epoch
+public fun epoch(ctx: &TxContext): u64
+
+// Get epoch timestamp (milliseconds)
+public fun epoch_timestamp_ms(ctx: &TxContext): u64
+
+// Derive fresh ID (for creating objects)
+public(package) fun fresh_object_address(ctx: &mut TxContext): address
+```
+
+---
+
+### balance.move
+
+Defines the `Balance` type for managing fungible token amounts.
+
+**Key Types:**
+- `Balance<T>` - A balance of type T (not an object)
+
+**Key Functions:**
+```move
+// Get balance value
+public fun value<T>(balance: &Balance<T>): u64
+
+// Create zero balance
+public fun zero<T>(): Balance<T>
+
+// Split balance
+public fun split<T>(balance: &mut Balance<T>, value: u64): Balance<T>
+
+// Join balances
+public fun join<T>(balance: &mut Balance<T>, other: Balance<T>)
+
+// Destroy zero balance
+public fun destroy_zero<T>(balance: Balance<T>)
+```
+
+---
+
+### event.move
+
+Provides functions for emitting on-chain events.
+
+**Key Functions:**
+```move
+// Emit event
+public fun emit<T: copy + drop>(event: T)
+```
+
+**Example:**
+```move
+use sui::event;
+
+struct ItemPurchased has copy, drop {
+    item_id: ID,
+    buyer: address,
+    price: u64,
+}
+
+public fun purchase(item: Item, payment: Coin<SUI>, ctx: &TxContext) {
+    // ... purchase logic ...
+    
+    event::emit(ItemPurchased {
+        item_id: object::id(&item),
+        buyer: tx_context::sender(ctx),
+        price: coin::value(&payment),
+    });
+}
+```
+
+---
+
+### table.move
+
+Provides a key-value store (dynamic fields that are objects).
+
+**Key Types:**
+- `Table<K, V>` - A table with key type K and value type V
+
+**Key Functions:**
+```move
+// Create new table
+public fun new<K: copy + drop + store, V: store>(ctx: &mut TxContext): Table<K, V>
+
+// Add entry
+public fun add<K: copy + drop + store, V: store>(table: &mut Table<K, V>, key: K, value: V)
+
+// Borrow entry
+public fun borrow<K: copy + drop + store, V: store>(table: &Table<K, V>, key: K): &V
+
+// Borrow mutable
+public fun borrow_mut<K: copy + drop + store, V: store>(table: &mut Table<K, V>, key: K): &mut V
+
+// Remove entry
+public fun remove<K: copy + drop + store, V: store>(table: &mut Table<K, V>, key: K): V
+
+// Check if contains
+public fun contains<K: copy + drop + store, V: store>(table: &Table<K, V>, key: K): bool
+
+// Destroy empty table
+public fun destroy_empty<K: copy + drop + store, V: store>(table: Table<K, V>)
+```
+
+**Example:**
+```move
+use sui::table::{Self, Table};
+
+struct Registry has key {
+    id: UID,
+    names: Table<address, vector<u8>>,
+}
+
+public fun register(registry: &mut Registry, name: vector<u8>, ctx: &TxContext) {
+    table::add(&mut registry.names, tx_context::sender(ctx), name);
+}
+```
+
+---
+
+### dynamic_field.move
+
+Provides dynamic fields (fields added at runtime).
+
+**Key Functions:**
+```move
+// Add dynamic field
+public fun add<Name: copy + drop + store, Value: store>(
+    object: &mut UID,
+    name: Name,
+    value: Value
+)
+
+// Borrow dynamic field
+public fun borrow<Name: copy + drop + store, Value: store>(
+    object: &UID,
+    name: Name
+): &Value
+
+// Borrow mutable
+public fun borrow_mut<Name: copy + drop + store, Value: store>(
+    object: &mut UID,
+    name: Name
+): &mut Value
+
+// Remove dynamic field
+public fun remove<Name: copy + drop + store, Value: store>(
+    object: &mut UID,
+    name: Name
+): Value
+
+// Check if exists
+public fun exists_<Name: copy + drop + store>(
+    object: &UID,
+    name: Name
+): bool
+```
+
+---
+
+### bag.move
+
+Provides a heterogeneous collection (like Table but can store different value types).
+
+**Key Types:**
+- `Bag` - A heterogeneous map
+
+**Key Functions:**
+```move
+// Create new bag
+public fun new(ctx: &mut TxContext): Bag
+
+// Add entry
+public fun add<K: copy + drop + store, V: store>(bag: &mut Bag, key: K, value: V)
+
+// Borrow entry
+public fun borrow<K: copy + drop + store, V: store>(bag: &Bag, key: K): &V
+
+// Remove entry
+public fun remove<K: copy + drop + store, V: store>(bag: &mut Bag, key: K): V
+```
+
+---
+
+### clock.move
+
+Provides access to on-chain time.
+
+**Key Functions:**
+```move
+// Get current timestamp in milliseconds
+public fun timestamp_ms(clock: &Clock): u64
+```
+
+**Example:**
+```move
+use sui::clock::{Self, Clock};
+
+public fun check_deadline(clock: &Clock, deadline: u64) {
+    assert!(clock::timestamp_ms(clock) <= deadline, EDeadlinePassed);
+}
+```
+
+---
+
+### package.move
+
+Provides package publishing capabilities.
+
+**Key Types:**
+- `Publisher` - Capability proving package authorship
+- `UpgradeCap` - Capability to upgrade a package
+
+**Key Functions:**
+```move
+// Claim publisher object (call in module initializer)
+public fun claim<OTW: drop>(otw: OTW, ctx: &mut TxContext): Publisher
+
+// Check if address published the package
+public fun from_package<T>(publisher: &Publisher): bool
+```
+
+---
+
+## Common Patterns
+
+### Creating Custom Coins
+
+```move
+module my_coin::usdc {
+    use sui::coin;
+    
+    struct USDC has drop {}
+    
+    fun init(witness: USDC, ctx: &mut TxContext) {
+        let (treasury, metadata) = coin::create_currency(
+            witness,
+            6, // decimals
+            b"USDC",
+            b"USD Coin",
+            b"Stablecoin pegged to USD",
+            option::none(),
+            ctx
+        );
+        transfer::public_freeze_object(metadata);
+        transfer::public_transfer(treasury, tx_context::sender(ctx));
+    }
+}
+```
+
+### Using Display
+
+```move
+use sui::display;
+use sui::package;
+
+fun init(otw: OTW, ctx: &mut TxContext) {
+    let publisher = package::claim(otw, ctx);
+    let display = display::new<MyNFT>(&publisher, ctx);
+    
+    display::add(&mut display, string::utf8(b"name"), string::utf8(b"{name}"));
+    display::add(&mut display, string::utf8(b"image_url"), string::utf8(b"{image_url}"));
+    
+    display::update_version(&mut display);
+    
+    transfer::public_transfer(publisher, tx_context::sender(ctx));
+    transfer::public_transfer(display, tx_context::sender(ctx));
+}
+```
+
+## Full Module List
+
+The Sui Framework at `0x2` includes:
+
+- `object` - Object model
+- `coin` - Fungible tokens
+- `balance` - Token balances
+- `transfer` - Object transfers
+- `tx_context` - Transaction context
+- `event` - Event emission
+- `table` - Key-value store
+- `bag` - Heterogeneous map
+- `object_table` - Table with object values
+- `object_bag` - Bag with object values
+- `dynamic_field` - Dynamic fields
+- `dynamic_object_field` - Dynamic object fields
+- `vec_map` - Vector-based map
+- `vec_set` - Vector-based set
+- `linked_table` - Linked list table
+- `table_vec` - Vector-like table
+- `priority_queue` - Priority queue
+- `display` - Object display metadata
+- `package` - Package publishing
+- `clock` - On-chain time
+- `bcs` - Binary serialization
+- `address` - Address utilities
+- `hex` - Hex encoding
+- `math` - Math utilities
+- `sui` - SUI coin module
+- `token` - Token standard (new)
+- `random` - Randomness API
+- `crypto` - Cryptographic primitives
+- `authenticator_state` - zkLogin state
+- `deny_list` - Address deny listing
+- `kiosk` - Kiosk trading protocol

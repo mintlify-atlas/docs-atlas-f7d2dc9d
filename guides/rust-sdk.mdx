@@ -1,0 +1,524 @@
+---
+title: Using the Rust SDK
+description: Build Sui applications with the official Rust SDK
+---
+
+The Sui Rust SDK provides a complete set of tools for interacting with the Sui blockchain from Rust applications.
+
+## Installation
+
+Add the SDK to your `Cargo.toml`:
+
+```toml
+[dependencies]
+sui-sdk = "1.18"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1.0"
+```
+
+## Creating a Client
+
+Connect to different Sui networks:
+
+### Connecting to Networks
+
+From `crates/sui-sdk/examples/sui_client.rs`:
+
+```rust
+use sui_sdk::SuiClientBuilder;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    // Local network
+    let sui = SuiClientBuilder::default()
+        .build("http://127.0.0.1:9000")
+        .await?;
+    println!("Sui local version: {}", sui.api_version());
+
+    // Or use dedicated functions
+    let sui_local = SuiClientBuilder::default()
+        .build_localnet()
+        .await?;
+
+    // Devnet
+    let sui_devnet = SuiClientBuilder::default()
+        .build_devnet()
+        .await?;
+
+    // Testnet
+    let sui_testnet = SuiClientBuilder::default()
+        .build_testnet()
+        .await?;
+
+    // Mainnet
+    let sui_mainnet = SuiClientBuilder::default()
+        .build_mainnet()
+        .await?;
+
+    // Check available methods
+    println!("RPC methods: {:?}", sui_testnet.available_rpc_methods());
+    println!("Subscriptions: {:?}", sui_testnet.available_subscriptions());
+
+    Ok(())
+}
+```
+
+## Reading Data
+
+From `crates/sui-sdk/examples/read_api.rs`:
+
+```rust
+use sui_sdk::rpc_types::{SuiObjectDataOptions, SuiTransactionBlockResponseOptions};
+use sui_sdk::types::base_types::ObjectID;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default().build_testnet().await?;
+    let address = /* your address */;
+
+    // Get owned objects
+    let owned_objects = sui
+        .read_api()
+        .get_owned_objects(
+            address,
+            None,      // query
+            None,      // cursor  
+            Some(5),   // limit
+        )
+        .await?;
+
+    println!("Owned objects: {:?}", owned_objects);
+
+    // Get specific object with options
+    let object_id = owned_objects.data.first().unwrap().object_id;
+    let obj_data_options = SuiObjectDataOptions {
+        show_type: true,
+        show_owner: true,
+        show_previous_transaction: true,
+        show_display: true,
+        show_content: true,
+        show_bcs: true,
+        show_storage_rebate: true,
+    };
+
+    let object = sui
+        .read_api()
+        .get_object_with_options(object_id, obj_data_options)
+        .await?;
+
+    println!("Object details: {:?}", object);
+
+    // Get chain identifier
+    let chain_id = sui.read_api().get_chain_identifier().await?;
+    println!("Chain ID: {:?}", chain_id);
+
+    // Get protocol config
+    let config = sui.read_api().get_protocol_config(None).await?;
+    println!("Protocol config: {:?}", config);
+
+    Ok(())
+}
+```
+
+## Working with Coins
+
+From `crates/sui-sdk/examples/coin_read_api.rs`:
+
+```rust
+use sui_sdk::SuiClientBuilder;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default().build_testnet().await?;
+    let address = /* your address */;
+
+    // Get all coins
+    let coins = sui
+        .coin_read_api()
+        .get_coins(address, None, None, None)
+        .await?;
+
+    println!("Coins: {:?}", coins);
+
+    // Get balance for specific coin type
+    let balance = sui
+        .coin_read_api()
+        .get_balance(address, None) // None = SUI
+        .await?;
+
+    println!("SUI balance: {}", balance.total_balance);
+
+    // Get all balances
+    let all_balances = sui
+        .coin_read_api()
+        .get_all_balances(address)
+        .await?;
+
+    for balance in all_balances {
+        println!("Type: {}, Balance: {}", balance.coin_type, balance.total_balance);
+    }
+
+    Ok(())
+}
+```
+
+## Building Transactions
+
+From `crates/sui-sdk/examples/programmable_transactions_api.rs`:
+
+```rust
+use sui_sdk::{
+    rpc_types::SuiTransactionBlockResponseOptions,
+    types::{
+        programmable_transaction_builder::ProgrammableTransactionBuilder,
+        transaction::{Argument, Command, Transaction, TransactionData},
+    },
+};
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default().build_testnet().await?;
+    let sender = /* your address */;
+    let recipient = /* recipient address */;
+
+    // Get a gas coin
+    let coins = sui
+        .coin_read_api()
+        .get_coins(sender, None, None, None)
+        .await?;
+    let coin = coins.data.into_iter().next().unwrap();
+
+    // Build programmable transaction
+    let mut ptb = ProgrammableTransactionBuilder::new();
+
+    // Split coin: create new coin with 1000 MIST
+    let split_amount = ptb.pure(1000u64)?;
+    ptb.command(Command::SplitCoins(
+        Argument::GasCoin,
+        vec![split_amount],
+    ));
+
+    // Transfer the split coin
+    let recipient_arg = ptb.pure(recipient)?;
+    ptb.command(Command::TransferObjects(
+        vec![Argument::Result(0)],
+        recipient_arg,
+    ));
+
+    let builder = ptb.finish();
+
+    // Create transaction data
+    let gas_budget = 5_000_000;
+    let gas_price = sui.read_api().get_reference_gas_price().await?;
+    let tx_data = TransactionData::new_programmable(
+        sender,
+        vec![coin.object_ref()],
+        builder,
+        gas_budget,
+        gas_price,
+    );
+
+    println!("Transaction built: {:?}", tx_data);
+
+    Ok(())
+}
+```
+
+## Calling Move Functions
+
+From `crates/sui-sdk/examples/function_move_call.rs`:
+
+```rust
+use sui_sdk::types::{
+    Identifier,
+    base_types::ObjectID,
+    programmable_transaction_builder::ProgrammableTransactionBuilder,
+    transaction::{Argument, CallArg, Command},
+};
+use anyhow::anyhow;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default().build_testnet().await?;
+    let sender = /* your address */;
+
+    let mut ptb = ProgrammableTransactionBuilder::new();
+
+    // Add input argument
+    let input_value = 10u64;
+    let input_argument = CallArg::Pure(bcs::to_bytes(&input_value).unwrap());
+    ptb.input(input_argument)?;
+
+    // Call Move function
+    let package = ObjectID::from_hex_literal("0x...").map_err(|e| anyhow!(e))?;
+    let module = Identifier::new("module_name").map_err(|e| anyhow!(e))?;
+    let function = Identifier::new("function_name").map_err(|e| anyhow!(e))?;
+
+    ptb.command(Command::move_call(
+        package,
+        module,
+        function,
+        vec![],              // type arguments
+        vec![Argument::Input(0)],  // arguments
+    ));
+
+    let builder = ptb.finish();
+
+    // Get gas and build transaction
+    let coins = sui.coin_read_api().get_coins(sender, None, None, None).await?;
+    let coin = coins.data.into_iter().next().unwrap();
+
+    let gas_budget = 10_000_000;
+    let gas_price = sui.read_api().get_reference_gas_price().await?;
+    let tx_data = TransactionData::new_programmable(
+        sender,
+        vec![coin.object_ref()],
+        builder,
+        gas_budget,
+        gas_price,
+    );
+
+    Ok(())
+}
+```
+
+## Signing and Executing
+
+From `crates/sui-sdk/examples/sign_tx_guide.rs`:
+
+```rust
+use fastcrypto::ed25519::Ed25519KeyPair;
+use fastcrypto::traits::{KeyPair, EncodeDecodeBase64};
+use rand::{SeedableRng, rngs::StdRng};
+use shared_crypto::intent::{Intent, IntentMessage};
+use sui_types::crypto::{SuiKeyPair, SuiSignature, Signer};
+use sui_types::signature::GenericSignature;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default().build_testnet().await?;
+
+    // Generate keypair (for testing - use secure key management in production)
+    let keypair = SuiKeyPair::Ed25519(
+        Ed25519KeyPair::generate(&mut StdRng::from_seed([0; 32]))
+    );
+    let sender = SuiAddress::from(&keypair.public());
+
+    // Build transaction (tx_data from previous examples)
+    let tx_data = /* ... */;
+
+    // Sign transaction
+    let intent_msg = IntentMessage::new(Intent::sui_transaction(), tx_data);
+    let raw_tx = bcs::to_bytes(&intent_msg).expect("bcs should not fail");
+
+    let mut hasher = sui_types::crypto::DefaultHash::default();
+    hasher.update(raw_tx.clone());
+    let digest = hasher.finalize().digest;
+
+    let signature = keypair.sign(&digest);
+
+    // Verify signature locally
+    let verification = signature.verify_secure(
+        &intent_msg,
+        sender,
+        sui_types::crypto::SignatureScheme::ED25519,
+    );
+    assert!(verification.is_ok());
+
+    // Execute transaction
+    let transaction_response = sui
+        .quorum_driver_api()
+        .execute_transaction_block(
+            sui_types::transaction::Transaction::from_generic_sig_data(
+                intent_msg.value,
+                vec![GenericSignature::Signature(signature)],
+            ),
+            SuiTransactionBlockResponseOptions::default(),
+            None,
+        )
+        .await?;
+
+    println!("Transaction digest: {}", transaction_response.digest);
+
+    Ok(())
+}
+```
+
+## Querying Events
+
+From `crates/sui-sdk/examples/event_api.rs`:
+
+```rust
+use sui_sdk::rpc_types::EventFilter;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default().build_testnet().await?;
+
+    // Query events by transaction
+    let events = sui
+        .event_api()
+        .query_events(
+            EventFilter::Transaction(digest),
+            None,     // cursor
+            Some(10), // limit
+            false,    // descending
+        )
+        .await?;
+
+    for event in events.data {
+        println!("Event: {:?}", event);
+    }
+
+    // Query by Move event type
+    let events = sui
+        .event_api()
+        .query_events(
+            EventFilter::MoveEventType(
+                "0x2::nft::NFTMinted".parse()?
+            ),
+            None,
+            Some(50),
+            false,
+        )
+        .await?;
+
+    Ok(())
+}
+```
+
+## Working with Objects
+
+```rust
+use sui_sdk::rpc_types::SuiObjectDataOptions;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default().build_testnet().await?;
+
+    // Get object
+    let object_id: ObjectID = "0x...".parse()?;
+    let object = sui
+        .read_api()
+        .get_object_with_options(
+            object_id,
+            SuiObjectDataOptions::full_content(),
+        )
+        .await?;
+
+    // Get dynamic fields
+    let dynamic_fields = sui
+        .read_api()
+        .get_dynamic_fields(object_id, None, None)
+        .await?;
+
+    for field in dynamic_fields.data {
+        println!("Dynamic field: {:?}", field);
+    }
+
+    Ok(())
+}
+```
+
+## Error Handling
+
+```rust
+use anyhow::{Context, Result};
+
+async fn transfer_sui(
+    sui: &SuiClient,
+    sender: SuiAddress,
+    recipient: SuiAddress,
+    amount: u64,
+) -> Result<TransactionDigest> {
+    // Get gas coin
+    let coins = sui
+        .coin_read_api()
+        .get_coins(sender, None, None, None)
+        .await
+        .context("Failed to get coins")?;
+
+    let coin = coins
+        .data
+        .into_iter()
+        .next()
+        .context("No coins found")?;
+
+    // Build transaction
+    let mut ptb = ProgrammableTransactionBuilder::new();
+    ptb.pay_sui(vec![recipient], vec![amount])
+        .context("Failed to build transaction")?;
+
+    // Execute
+    // ...
+
+    Ok(digest)
+}
+```
+
+## Best Practices
+
+### 1. Reuse client instances
+
+```rust
+// Good: Share client
+struct App {
+    sui_client: Arc<SuiClient>,
+}
+
+// Avoid: Create new client for each request
+async fn bad_example() {
+    let client = SuiClientBuilder::default().build_testnet().await?;
+    // Use once and drop
+}
+```
+
+### 2. Handle errors properly
+
+```rust
+use anyhow::{Context, Result};
+
+async fn safe_operation() -> Result<()> {
+    let sui = SuiClientBuilder::default()
+        .build_testnet()
+        .await
+        .context("Failed to connect to testnet")?;
+
+    let objects = sui
+        .read_api()
+        .get_owned_objects(address, None, None, None)
+        .await
+        .context("Failed to fetch objects")?;
+
+    Ok(())
+}
+```
+
+### 3. Use connection pooling
+
+```rust
+use std::sync::Arc;
+
+#[derive(Clone)]
+struct SuiService {
+    client: Arc<SuiClient>,
+}
+
+impl SuiService {
+    async fn new() -> Result<Self> {
+        let client = SuiClientBuilder::default()
+            .build_testnet()
+            .await?;
+        Ok(Self {
+            client: Arc::new(client),
+        })
+    }
+}
+```
+
+## Next Steps
+
+- [Learn about TypeScript SDK](/guides/typescript-sdk)
+- [Build transactions](/guides/build-transactions)
+- [Query blockchain data](/guides/query-blockchain)
+- [Explore programmable transactions](/guides/programmable-transactions)

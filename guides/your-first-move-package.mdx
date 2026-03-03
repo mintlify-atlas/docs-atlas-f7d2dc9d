@@ -1,0 +1,328 @@
+---
+title: Creating Your First Move Package
+description: Build and deploy your first Move smart contract on Sui
+---
+
+This guide walks you through creating, building, testing, and publishing your first Move package on Sui.
+
+## What You'll Build
+
+You'll create a simple package that defines a `Sword` object with magical properties - a common starting point for understanding Sui's object model.
+
+## Prerequisites
+
+- [Set up your development environment](/guides/setup-dev-environment)
+- Basic understanding of programming concepts
+
+## Create a New Package
+
+<Steps>
+
+### Initialize the package
+
+Create a new Move package:
+
+```bash
+sui move new my_first_package
+cd my_first_package
+```
+
+This creates a directory structure:
+
+```
+my_first_package/
+├── Move.toml
+├── sources/
+└── tests/
+```
+
+### Understand the package manifest
+
+Open `Move.toml` to see the package configuration:
+
+```toml
+[package]
+name = "my_first_package"
+version = "0.0.1"
+edition = "2024.beta"
+
+[dependencies]
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "framework/mainnet" }
+
+[addresses]
+my_first_package = "0x0"
+```
+
+### Create your first module
+
+Create `sources/sword.move`:
+
+```move
+module my_first_package::sword {
+    use sui::object::{Self, UID};
+    use sui::transfer;
+    use sui::tx_context::{Self, TxContext};
+
+    /// A sword with magical properties
+    public struct Sword has key, store {
+        id: UID,
+        magic: u64,
+        strength: u64,
+    }
+
+    /// A forge for creating swords
+    public struct Forge has key {
+        id: UID,
+        swords_created: u64,
+    }
+
+    /// Module initializer - called once when published
+    fun init(ctx: &mut TxContext) {
+        let admin = Forge {
+            id: object::new(ctx),
+            swords_created: 0,
+        };
+        // Transfer forge to publisher
+        transfer::transfer(admin, tx_context::sender(ctx));
+    }
+
+    /// Create a new sword
+    public fun new_sword(
+        forge: &mut Forge,
+        magic: u64,
+        strength: u64,
+        ctx: &mut TxContext
+    ): Sword {
+        forge.swords_created = forge.swords_created + 1;
+        Sword {
+            id: object::new(ctx),
+            magic,
+            strength,
+        }
+    }
+
+    /// Accessor for sword magic
+    public fun magic(sword: &Sword): u64 {
+        sword.magic
+    }
+
+    /// Accessor for sword strength
+    public fun strength(sword: &Sword): u64 {
+        sword.strength
+    }
+
+    /// Transfer sword to recipient
+    public fun transfer_sword(
+        sword: Sword,
+        recipient: address,
+        _ctx: &mut TxContext
+    ) {
+        transfer::public_transfer(sword, recipient);
+    }
+}
+```
+
+</Steps>
+
+## Build Your Package
+
+Compile the Move code:
+
+```bash
+sui move build
+```
+
+Successful output:
+
+```
+INCLUDING DEPENDENCY Sui
+INCLUDING DEPENDENCY MoveStdlib
+BUILDING my_first_package
+```
+
+## Add Tests
+
+Create `sources/sword_tests.move`:
+
+```move
+#[test_only]
+module my_first_package::sword_tests {
+    use my_first_package::sword::{Self, Forge, Sword};
+    use sui::test_scenario;
+
+    #[test]
+    fun test_sword_creation() {
+        let admin = @0xAD;
+        let user = @0xB0B;
+
+        // Initialize test scenario
+        let mut scenario = test_scenario::begin(admin);
+
+        // Admin initializes the module
+        {
+            sword::init_for_testing(scenario.ctx());
+        };
+
+        // Admin creates a sword
+        scenario.next_tx(admin);
+        {
+            let mut forge = scenario.take_from_sender<Forge>();
+            let sword = sword::new_sword(&mut forge, 10, 5, scenario.ctx());
+
+            // Verify sword properties
+            assert!(sword.magic() == 10, 0);
+            assert!(sword.strength() == 5, 1);
+
+            // Transfer to user
+            sword::transfer_sword(sword, user, scenario.ctx());
+            scenario.return_to_sender(forge);
+        };
+
+        // User receives the sword
+        scenario.next_tx(user);
+        {
+            let sword = scenario.take_from_sender<Sword>();
+            assert!(sword.magic() == 10, 2);
+            scenario.return_to_sender(sword);
+        };
+
+        scenario.end();
+    }
+}
+```
+
+Note: Add this helper to `sword.move` for testing:
+
+```move
+#[test_only]
+public fun init_for_testing(ctx: &mut TxContext) {
+    init(ctx);
+}
+```
+
+## Run Tests
+
+Execute the test suite:
+
+```bash
+sui move test
+```
+
+Expected output:
+
+```
+INCLUDING DEPENDENCY Sui
+INCLUDING DEPENDENCY MoveStdlib
+BUILDING my_first_package
+Running Move unit tests
+[ PASS    ] my_first_package::sword_tests::test_sword_creation
+Test result: OK. Total tests: 1; passed: 1; failed: 0
+```
+
+## Publish to Testnet
+
+<Steps>
+
+### Get testnet SUI
+
+Ensure you have gas for deployment:
+
+```bash
+sui client faucet
+sui client gas
+```
+
+### Publish the package
+
+```bash
+sui client publish --gas-budget 100000000
+```
+
+You'll see output including:
+
+```
+Transaction Digest: <digest>
+Published Objects:
+  PackageID: 0x<package_id>
+  Version: 1
+Created Objects:
+  ObjectID: 0x<forge_object_id>
+  Owner: Account Address ( 0x<your_address> )
+```
+
+### Save important values
+
+Save the Package ID and Forge object ID - you'll need them to interact with your package.
+
+</Steps>
+
+## Interact with Your Package
+
+Call the `new_sword` function:
+
+```bash
+sui client call \
+  --package 0x<package_id> \
+  --module sword \
+  --function new_sword \
+  --args 0x<forge_object_id> 42 7 \
+  --gas-budget 10000000
+```
+
+This creates a sword with magic=42 and strength=7.
+
+## Understanding Key Concepts
+
+### Abilities
+
+- `key`: Object can be used as a key in global storage (has UID)
+- `store`: Object can be stored inside other objects
+- `copy`: Object can be copied
+- `drop`: Object can be dropped/destroyed implicitly
+
+### Module Initializer
+
+The `init` function runs once when the package is published:
+
+```move
+fun init(ctx: &mut TxContext) {
+    // One-time setup code
+}
+```
+
+### Object Creation
+
+All objects on Sui have a unique ID:
+
+```move
+Sword {
+    id: object::new(ctx),  // Creates unique UID
+    magic,
+    strength,
+}
+```
+
+## Next Steps
+
+- [Learn about testing Move code](/guides/testing-move-code)
+- [Understand Move package structure](/guides/move-packages)
+- [Create custom objects](/guides/custom-objects)
+- Explore [more examples](https://github.com/MystenLabs/sui/tree/main/examples/move)
+
+## Common Issues
+
+### Build errors
+
+If you see "unresolved import" errors, ensure dependencies in `Move.toml` are correct.
+
+### Test failures
+
+Use `sui move test --verbose` for detailed output.
+
+### Publication fails
+
+Check you have sufficient gas:
+
+```bash
+sui client gas
+```

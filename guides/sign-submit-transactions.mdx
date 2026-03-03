@@ -1,0 +1,189 @@
+---
+title: Signing and Submitting Transactions
+description: Sign transactions and submit them to the Sui network
+---
+
+Learn how to properly sign and execute transactions on Sui.
+
+## Overview
+
+Transaction execution involves:
+1. **Build**: Create the transaction
+2. **Sign**: Cryptographically sign with private key
+3. **Submit**: Send to network for execution
+4. **Confirm**: Wait for and verify results
+
+## TypeScript SDK
+
+### Sign and execute
+
+```typescript
+import { Transaction } from '@mysten/sui/transactions';
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
+import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
+
+const client = new SuiClient({ url: getFullnodeUrl('testnet') });
+const keypair = new Ed25519Keypair();
+
+// Build transaction
+const tx = new Transaction();
+tx.transferObjects(
+  [tx.splitCoins(tx.gas, [1_000_000])],
+  recipient
+);
+tx.setSender(keypair.getPublicKey().toSuiAddress());
+
+// Sign and execute
+const result = await client.signAndExecuteTransaction({
+  transaction: tx,
+  signer: keypair,
+  options: {
+    showEffects: true,
+    showObjectChanges: true,
+    showEvents: true,
+  },
+});
+
+console.log('Digest:', result.digest);
+console.log('Status:', result.effects?.status);
+```
+
+### Separate signing and execution
+
+```typescript
+// Build and sign
+const txBytes = await tx.build({ client });
+const signature = await keypair.signTransaction(txBytes);
+
+// Execute with signature
+const result = await client.executeTransactionBlock({
+  transactionBlock: txBytes,
+  signature: signature.signature,
+  options: {
+    showEffects: true,
+  },
+});
+```
+
+## Rust SDK
+
+From `crates/sui-sdk/examples/sign_tx_guide.rs`:
+
+```rust
+use sui_sdk::SuiClientBuilder;
+use sui_types::crypto::{SuiKeyPair, Signer};
+use shared_crypto::intent::{Intent, IntentMessage};
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default().build_testnet().await?;
+    
+    // Generate or load keypair
+    let keypair = /* ... */;
+    let sender = SuiAddress::from(&keypair.public());
+
+    // Build transaction data
+    let tx_data = /* ... */;
+
+    // Create intent message
+    let intent_msg = IntentMessage::new(
+        Intent::sui_transaction(),
+        tx_data
+    );
+
+    // Sign
+    let raw_tx = bcs::to_bytes(&intent_msg)?;
+    let mut hasher = sui_types::crypto::DefaultHash::default();
+    hasher.update(raw_tx);
+    let digest = hasher.finalize().digest;
+    let signature = keypair.sign(&digest);
+
+    // Verify locally (optional)
+    signature.verify_secure(
+        &intent_msg,
+        sender,
+        sui_types::crypto::SignatureScheme::ED25519,
+    )?;
+
+    // Execute
+    let response = sui
+        .quorum_driver_api()
+        .execute_transaction_block(
+            Transaction::from_generic_sig_data(
+                intent_msg.value,
+                vec![GenericSignature::Signature(signature)],
+            ),
+            SuiTransactionBlockResponseOptions::default(),
+            None,
+        )
+        .await?;
+
+    println!("Transaction digest: {}", response.digest);
+    Ok(())
+}
+```
+
+## Waiting for Confirmation
+
+### Poll for transaction
+
+```typescript
+async function waitForTransaction(digest: string) {
+  let attempts = 0;
+  const maxAttempts = 30;
+
+  while (attempts < maxAttempts) {
+    try {
+      const tx = await client.getTransactionBlock({
+        digest,
+        options: { showEffects: true },
+      });
+
+      if (tx.effects?.status?.status === 'success') {
+        return tx;
+      } else if (tx.effects?.status?.status === 'failure') {
+        throw new Error(`Transaction failed: ${tx.effects.status.error}`);
+      }
+    } catch (error) {
+      // Transaction not found yet
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    attempts++;
+  }
+
+  throw new Error('Transaction timeout');
+}
+```
+
+## Error Handling
+
+```typescript
+async function safeExecute(tx: Transaction, signer: Ed25519Keypair) {
+  try {
+    const result = await client.signAndExecuteTransaction({
+      transaction: tx,
+      signer,
+    });
+
+    if (result.effects?.status?.status !== 'success') {
+      throw new Error(`Failed: ${result.effects?.status?.error}`);
+    }
+
+    return result;
+  } catch (error) {
+    if (error.message.includes('insufficient gas')) {
+      console.error('Increase gas budget');
+    } else if (error.message.includes('object not found')) {
+      console.error('Object does not exist');
+    }
+    throw error;
+  }
+}
+```
+
+## Next Steps
+
+- [Programmable transactions](/guides/programmable-transactions)
+- [Build transactions](/guides/build-transactions)
+- [Query blockchain](/guides/query-blockchain)

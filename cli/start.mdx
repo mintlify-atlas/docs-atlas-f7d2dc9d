@@ -1,0 +1,558 @@
+---
+title: sui start
+description: Start a local Sui network for development and testing
+---
+
+The `sui start` command starts a local Sui network. It can run in two modes: persisted state (using existing genesis) or ephemeral state (regenerated each run).
+
+## Synopsis
+
+```bash
+sui start [OPTIONS]
+```
+
+## Options
+
+<ParamField path="--network.config" type="path">
+  Config directory containing network configuration. If not specified and no genesis exists, a new one is auto-generated in `~/.sui/sui_config/`
+</ParamField>
+
+<ParamField path="--force-regenesis" type="boolean">
+  Create new genesis each run without persisting state. Only use when you want to start from scratch every time
+</ParamField>
+
+<ParamField path="--with-faucet" type="string">
+  Start a faucet with specified host:port (e.g., `0.0.0.0:9123`). Default: `0.0.0.0:9123` if flag is provided without value. Use `--with-faucet=HOST:PORT` for custom values
+</ParamField>
+
+<ParamField path="--with-indexer" type="url">
+  Start an indexer with PostgreSQL database. Three modes:
+  - Not specified: No indexer
+  - `--with-indexer`: Temporary local database in config directory
+  - `--with-indexer=<URL>`: Use provided PostgreSQL database URL. Use `--with-indexer=postgres://...` for custom database
+</ParamField>
+
+<ParamField path="--with-consistent-store" type="string">
+  Start a Consistent Store at specified host:port. Default: `0.0.0.0:9124` if flag is provided. Automatically enabled when `--with-graphql` is set. Use `--with-consistent-store=HOST:PORT` for custom values
+</ParamField>
+
+<ParamField path="--with-graphql" type="string">
+  Start a GraphQL server at specified host:port. Default: `0.0.0.0:9125` if flag is provided. Automatically enables indexer and consistent store if not already set. Use `--with-graphql=HOST:PORT` for custom values
+</ParamField>
+
+<ParamField path="--fullnode-rpc-port" type="u16" default="9000">
+  Port to start the Fullnode RPC server on
+</ParamField>
+
+<ParamField path="--epoch-duration-ms" type="u64">
+  Set the epoch duration in milliseconds. Can only be used with `--force-regenesis` or when no genesis exists. Default: 60000ms (1 minute) with `--force-regenesis`
+</ParamField>
+
+<ParamField path="--data-ingestion-dir" type="path">
+  Directory to dump executed checkpoints as files. Incompatible with `--no-full-node`. Defaults to temporary directory if `--with-indexer` is set
+</ParamField>
+
+<ParamField path="--no-full-node" type="boolean">
+  Start the network without a fullnode
+</ParamField>
+
+<ParamField path="--committee-size" type="usize">
+  Set number of validators in the network. Only applies when generating new genesis (with `--force-regenesis` or no existing genesis)
+</ParamField>
+
+## Description
+
+By default, `sui start` starts a local network from the genesis blob that exists in the Sui config directory. If no genesis exists, it will generate one automatically.
+
+The network includes:
+- Validator nodes (default: 4 validators)
+- Optional fullnode (default: enabled)
+- Optional faucet service
+- Optional indexer with PostgreSQL
+- Optional GraphQL server
+- Optional consistent store
+
+## Operational Modes
+
+### 1. Persisted Mode (Default)
+
+State is preserved between runs:
+
+```bash
+# First run - generates genesis
+sui start
+
+# Stop with Ctrl+C
+
+# Second run - uses existing genesis, state persists
+sui start
+```
+
+### 2. Ephemeral Mode
+
+New genesis each run, no state persistence:
+
+```bash
+sui start --force-regenesis
+```
+
+<Warning>
+With `--force-regenesis`, all state is lost when the network stops. Use only for testing.
+</Warning>
+
+### 3. Custom Config Directory
+
+Use a specific network configuration:
+
+```bash
+sui start --network.config /path/to/network-config
+```
+
+## Starting Services
+
+### Faucet
+
+Start with a local faucet:
+
+```bash
+# Default port (9123)
+sui start --with-faucet
+
+# Custom host and port
+sui start --with-faucet=127.0.0.1:5000
+
+# Custom port, all interfaces
+sui start --with-faucet=0.0.0.0:5000
+```
+
+**Faucet endpoints:**
+```bash
+# Request tokens
+curl -X POST http://127.0.0.1:9123/gas \
+  -H 'Content-Type: application/json' \
+  -d '{"FixedAmountRequest": {"recipient": "0xADDRESS"}}'
+
+# Or via CLI
+sui client faucet --url http://127.0.0.1:9123
+```
+
+**Default faucet amount:** 200 SUI (200,000,000,000 MIST)
+
+### Indexer
+
+Start with an indexer:
+
+```bash
+# Temporary local database
+sui start --with-indexer
+
+# External PostgreSQL database
+sui start --with-indexer=postgres://user:pass@localhost:5432/sui_indexer
+```
+
+<Note>
+Indexer requires PostgreSQL. The local database option automatically manages a temporary PostgreSQL instance.
+</Note>
+
+### GraphQL Server
+
+Start with GraphQL API:
+
+```bash
+# Default port (9125), auto-enables indexer and consistent store
+sui start --with-graphql
+
+# Custom host and port
+sui start --with-graphql=0.0.0.0:8080
+
+# With custom indexer database
+sui start \
+  --with-graphql \
+  --with-indexer=postgres://user:pass@localhost/sui
+```
+
+**GraphQL endpoint:** `http://127.0.0.1:9125/graphql`
+
+**GraphQL IDE:** `http://127.0.0.1:9125` (if not disabled)
+
+### Consistent Store
+
+Start with consistent state storage:
+
+```bash
+# Default port (9124)
+sui start --with-consistent-store
+
+# Custom host and port
+sui start --with-consistent-store=127.0.0.1:8000
+```
+
+**Endpoint:** `http://127.0.0.1:9124`
+
+## Full Stack Local Development
+
+Start all services for complete local development:
+
+```bash
+sui start \
+  --with-faucet \
+  --with-indexer \
+  --with-graphql \
+  --epoch-duration-ms 30000
+```
+
+This provides:
+- **RPC**: http://127.0.0.1:9000
+- **Faucet**: http://127.0.0.1:9123
+- **GraphQL**: http://127.0.0.1:9125
+- **Consistent Store**: http://127.0.0.1:9124
+- **Epoch Duration**: 30 seconds
+
+## Network Configuration
+
+### Default Setup
+
+When `sui start` runs without existing genesis:
+
+- **Validators**: 4 validators (or `--committee-size` value)
+- **Fullnode**: 1 fullnode on port 9000
+- **Epoch Duration**: 60 seconds with `--force-regenesis`
+- **Config Directory**: `~/.sui/sui_config/`
+
+### Custom Validators
+
+```bash
+# 7-validator network
+sui start --force-regenesis --committee-size 7
+```
+
+### Custom Epoch Duration
+
+```bash
+# 5-minute epochs
+sui start --force-regenesis --epoch-duration-ms 300000
+
+# 1-hour epochs
+sui start --epoch-duration-ms 3600000
+```
+
+<Note>
+Epoch duration can only be set when generating new genesis (`--force-regenesis`) or when no genesis exists.
+</Note>
+
+### No Fullnode Mode
+
+Run only validators without fullnode:
+
+```bash
+sui start --no-full-node
+```
+
+<Warning>
+Without a fullnode, you cannot:
+- Submit transactions via RPC
+- Query chain state
+- Run indexer or GraphQL
+</Warning>
+
+## Data Ingestion
+
+Capture checkpoint data to files:
+
+```bash
+sui start --data-ingestion-dir ./checkpoints
+```
+
+Checkpoint files are written to the specified directory for analysis or replay.
+
+## Protocol Config Overrides
+
+Override protocol parameters for local testing:
+
+```bash
+# Enable overrides
+export SUI_PROTOCOL_CONFIG_OVERRIDE_ENABLE=1
+
+# Set specific parameters
+export SUI_PROTOCOL_CONFIG_OVERRIDE_min_checkpoint_interval_ms=1000
+export SUI_PROTOCOL_CONFIG_OVERRIDE_max_transactions_per_checkpoint=10000
+
+# Start network
+sui start --force-regenesis
+```
+
+<Warning>
+Protocol config must match across all nodes. Changing these values outside local networks is dangerous and may break the network.
+</Warning>
+
+## Connecting Clients
+
+After starting the network, configure clients to connect:
+
+```bash
+# Add local network environment
+sui client new-env --alias local --rpc http://127.0.0.1:9000
+
+# Switch to local network
+sui client switch --env local
+
+# Verify connection
+sui client active-env
+sui client chain-identifier
+```
+
+## Workflow Examples
+
+### Quick Testing
+
+```bash
+# Start ephemeral network with faucet
+sui start --force-regenesis --with-faucet
+
+# In another terminal
+sui client switch --env local
+sui client faucet
+sui client balance
+
+# Test your dapp...
+
+# Stop with Ctrl+C - all state is lost
+```
+
+### Persistent Development
+
+```bash
+# First time - generates genesis
+sui start --with-faucet --epoch-duration-ms 60000
+
+# Stop with Ctrl+C
+
+# Later - state persists
+sui start --with-faucet
+
+# Same objects, accounts, and state remain
+```
+
+### Full Development Stack
+
+```bash
+# Start complete stack
+sui start \
+  --with-faucet \
+  --with-indexer \
+  --with-graphql \
+  --epoch-duration-ms 30000 \
+  --committee-size 4
+
+# Configure client
+sui client new-env --alias devnet-local --rpc http://127.0.0.1:9000
+sui client switch --env devnet-local
+
+# Request tokens
+sui client faucet
+
+# Query via GraphQL
+curl http://127.0.0.1:9125/graphql -H 'Content-Type: application/json' -d '{
+  "query": "{ chainIdentifier }"
+}'
+```
+
+### Multi-Validator Testing
+
+```bash
+# Create 7-validator network with fast epochs
+sui start \
+  --force-regenesis \
+  --committee-size 7 \
+  --epoch-duration-ms 30000 \
+  --with-faucet
+
+# Test validator behavior, epoch transitions, etc.
+```
+
+## Health Monitoring
+
+The network runs a health check loop:
+
+- **Interval**: Every 3 seconds
+- **Unhealthy threshold**: 3 consecutive failures
+- **Auto-shutdown**: On persistent health check failures
+
+Monitor logs for:
+```
+INFO sui::start: Cluster started
+INFO sui::start: Fullnode RPC URL: http://127.0.0.1:9000
+```
+
+## Stopping the Network
+
+Gracefully stop the network:
+
+```bash
+# Press Ctrl+C
+^C
+INFO sui::start: Received Ctrl+C, shutting down...
+INFO sui::start: Shutting down RPC services...
+```
+
+Force kill (not recommended):
+```bash
+# If Ctrl+C doesn't work
+kill -9 $(pgrep sui)
+```
+
+## Port Usage
+
+Default ports used by `sui start`:
+
+| Service | Default Port | Flag |
+|---------|-------------|------|
+| Fullnode RPC | 9000 | `--fullnode-rpc-port` |
+| Faucet | 9123 | `--with-faucet` |
+| Consistent Store | 9124 | `--with-consistent-store` |
+| GraphQL | 9125 | `--with-graphql` |
+| Validator 0 | 8080+ | (in network config) |
+
+Ensure these ports are available before starting.
+
+## Troubleshooting
+
+### Port Already in Use
+
+**Error:** Address already in use
+
+**Solution:**
+```bash
+# Use different ports
+sui start \
+  --fullnode-rpc-port 9001 \
+  --with-faucet=0.0.0.0:9124 \
+  --with-graphql=0.0.0.0:9126
+
+# Or kill existing process
+lsof -ti:9000 | xargs kill
+```
+
+### Genesis Conflict
+
+**Error:** Cannot use `--epoch-duration-ms` with existing genesis
+
+**Solution:**
+```bash
+# Either use --force-regenesis
+sui start --force-regenesis --epoch-duration-ms 120000
+
+# Or delete existing genesis
+rm -rf ~/.sui/sui_config/
+sui start --epoch-duration-ms 120000
+```
+
+### PostgreSQL Issues
+
+**Error:** Failed to start indexer
+
+**Solution:**
+```bash
+# Check PostgreSQL is installed (for external DB)
+psql --version
+
+# Use temporary local database
+sui start --with-indexer  # No URL parameter
+
+# Or provide correct database URL
+sui start --with-indexer=postgres://localhost/sui_indexer
+```
+
+### Network Won't Start
+
+**Error:** Validators fail health checks
+
+**Solution:**
+```bash
+# Check logs for specific errors
+RUST_LOG=debug sui start --force-regenesis
+
+# Clear all state and try again
+rm -rf ~/.sui/sui_config/
+sui start
+```
+
+### Faucet Not Working
+
+**Error:** Faucet requests fail
+
+**Solution:**
+```bash
+# Verify faucet is running
+curl http://127.0.0.1:9123/health
+
+# Check faucet has funds (persisted mode)
+sui client balance --address <FAUCET_ADDRESS>
+
+# Or restart with --force-regenesis to get fresh faucet
+sui start --force-regenesis --with-faucet
+```
+
+## Advanced Configuration
+
+### Using Pre-Generated Genesis
+
+```bash
+# Generate genesis separately
+sui genesis --working-dir ./my-network --with-faucet
+
+# Start using that genesis
+sui start --network.config ./my-network --with-faucet
+```
+
+### External PostgreSQL for Indexer
+
+```bash
+# Set up database
+createdb sui_indexer
+psql sui_indexer -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'
+
+# Start with indexer
+sui start \
+  --with-indexer=postgres://localhost/sui_indexer \
+  --with-graphql
+```
+
+### Development with Auto-Restart
+
+Use `watchexec` or similar tools:
+
+```bash
+# Install watchexec
+cargo install watchexec-cli
+
+# Auto-restart on source changes
+watchexec -r -e rs,toml -- sui start --force-regenesis
+```
+
+## Performance Tuning
+
+For faster local testing:
+
+```bash
+sui start \
+  --force-regenesis \
+  --committee-size 1 \
+  --epoch-duration-ms 10000
+```
+
+For production-like testing:
+
+```bash
+sui start \
+  --committee-size 7 \
+  --epoch-duration-ms 86400000 \
+  --with-indexer \
+  --with-graphql
+```
+
+## See Also
+
+- [sui genesis](./genesis) - Generate genesis configuration
+- [sui client](./client) - Interact with the network
+- [GraphQL Documentation](../api/graphql) - Query the GraphQL API

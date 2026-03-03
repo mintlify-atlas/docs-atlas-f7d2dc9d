@@ -1,0 +1,209 @@
+---
+title: Building Transactions
+description: Create and structure transactions on Sui
+---
+
+Sui's programmable transaction blocks allow you to chain multiple operations in a single transaction.
+
+## Basic Transaction Structure
+
+A transaction contains:
+- **Inputs**: Arguments passed to the transaction
+- **Commands**: Operations to perform (Move calls, transfers, etc.)
+- **Gas payment**: Coins used to pay for execution
+
+## Simple Transfer
+
+<CodeGroup>
+```typescript TypeScript
+import { Transaction } from '@mysten/sui/transactions';
+
+const tx = new Transaction();
+
+// Transfer 1 SUI (1_000_000_000 MIST)
+tx.transferObjects(
+  [tx.splitCoins(tx.gas, [1_000_000_000])],
+  '0x...recipient...'
+);
+
+tx.setSender(senderAddress);
+```
+
+```rust Rust
+use sui_sdk::types::programmable_transaction_builder::ProgrammableTransactionBuilder;
+use sui_sdk::types::transaction::{Argument, Command};
+
+let mut ptb = ProgrammableTransactionBuilder::new();
+
+// Pay 1000 MIST to recipient
+ptb.pay_sui(vec![recipient], vec![1000])?;
+
+let builder = ptb.finish();
+```
+</CodeGroup>
+
+## Programmable Transaction Blocks
+
+### Split and transfer coins
+
+<CodeGroup>
+```typescript TypeScript
+const tx = new Transaction();
+
+// Split multiple amounts
+const [coin1, coin2, coin3] = tx.splitCoins(tx.gas, [
+  1000000, // 0.001 SUI
+  2000000, // 0.002 SUI
+  3000000, // 0.003 SUI
+]);
+
+// Transfer to different recipients
+tx.transferObjects([coin1], recipient1);
+tx.transferObjects([coin2], recipient2);
+tx.transferObjects([coin3], recipient3);
+```
+
+```rust Rust
+let mut ptb = ProgrammableTransactionBuilder::new();
+
+// Split amounts
+let amount1 = ptb.pure(1000000u64)?;
+let amount2 = ptb.pure(2000000u64)?;
+let amount3 = ptb.pure(3000000u64)?;
+
+ptb.command(Command::SplitCoins(
+  Argument::GasCoin,
+  vec![amount1, amount2, amount3]
+));
+
+// Transfer coins (results 0, 1, 2)
+let recipient1 = ptb.pure(recipient1)?;
+ptb.command(Command::TransferObjects(
+  vec![Argument::Result(0)],
+  recipient1,
+));
+```
+</CodeGroup>
+
+### Call Move functions
+
+<CodeGroup>
+```typescript TypeScript
+const tx = new Transaction();
+
+// Call a Move function
+tx.moveCall({
+  target: '0xPACKAGE::module::function_name',
+  arguments: [
+    tx.pure.u64(42),
+    tx.pure.address('0x...'),
+    tx.object('0xOBJECT_ID'),
+  ],
+  typeArguments: ['0x2::sui::SUI'],
+});
+```
+
+```rust Rust
+use sui_sdk::types::Identifier;
+use sui_sdk::types::base_types::ObjectID;
+
+let mut ptb = ProgrammableTransactionBuilder::new();
+
+let input_value = 42u64;
+let input = CallArg::Pure(bcs::to_bytes(&input_value)?);
+ptb.input(input)?;
+
+let package = ObjectID::from_hex_literal("0x...")? ;
+let module = Identifier::new("module")?;
+let function = Identifier::new("function_name")?;
+
+ptb.command(Command::move_call(
+  package,
+  module,
+  function,
+  vec![], // type arguments
+  vec![Argument::Input(0)],
+));
+```
+</CodeGroup>
+
+## Common Patterns
+
+### Merge coins
+
+```typescript
+const tx = new Transaction();
+
+// Merge multiple coins into one
+tx.mergeCoins(coinId1, [coinId2, coinId3, coinId4]);
+```
+
+### Create and transfer object
+
+```typescript
+const tx = new Transaction();
+
+// Call function that creates object
+const [newObject] = tx.moveCall({
+  target: '0xPACKAGE::nft::mint',
+  arguments: [
+    tx.pure.string('NFT Name'),
+    tx.pure.string('Description'),
+  ],
+});
+
+// Transfer the created object
+tx.transferObjects([newObject], recipient);
+```
+
+### Complex multi-step transaction
+
+```typescript
+const tx = new Transaction();
+
+// 1. Split coins
+const [paymentCoin] = tx.splitCoins(tx.gas, [1000000]);
+
+// 2. Purchase item
+const [item] = tx.moveCall({
+  target: '${packageId}::shop::purchase',
+  arguments: [tx.object(shopId), paymentCoin],
+});
+
+// 3. Customize item
+tx.moveCall({
+  target: '${packageId}::item::customize',
+  arguments: [
+    item,
+    tx.pure.string('Custom Name'),
+  ],
+});
+
+// 4. Transfer to owner
+tx.transferObjects([item], recipient);
+```
+
+## Gas Management
+
+### Set gas budget
+
+```typescript
+const tx = new Transaction();
+tx.setGasBudget(10_000_000); // 0.01 SUI
+```
+
+### Use specific gas coins
+
+```typescript
+const tx = new Transaction();
+tx.setGasPayment([{
+  objectId: '0x...', 
+  version: '123',
+  digest: '...',
+}]);
+```
+
+## Next Steps
+
+- [Sign and submit transactions](/guides/sign-submit-transactions)
+- [Programmable transaction examples](/guides/programmable-transactions)

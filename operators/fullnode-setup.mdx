@@ -1,0 +1,246 @@
+---
+title: Setting Up a Fullnode
+description: Complete guide to setting up and running a Sui fullnode with configuration examples and deployment options.
+---
+
+A Sui fullnode stores and validates the blockchain state, providing access to the network through JSON-RPC and WebSocket interfaces.
+
+## System Requirements
+
+Before setting up a fullnode, ensure your system meets the minimum requirements. See [System Requirements](/operators/system-requirements) for details.
+
+## Prerequisites
+
+- Access to the genesis blob for your target network (mainnet, testnet, or devnet)
+- Sufficient disk space for blockchain data (4TB+ recommended)
+- Network connectivity with open required ports
+
+## Installation Methods
+
+### Using Pre-built Binaries
+
+Download the latest sui-node binary from S3:
+
+```bash
+export SUI_SHA=<target-version>
+wget https://releases.sui.io/$SUI_SHA/sui-node
+chmod +x sui-node
+sudo mv sui-node /opt/sui/bin/
+```
+
+### Using Docker
+
+Pull the official Docker image:
+
+```bash
+docker pull mysten/sui-node:mainnet-v1.19.1
+```
+
+### Building from Source
+
+Clone and build the Sui repository:
+
+```bash
+git clone https://github.com/MystenLabs/sui.git && cd sui
+git checkout [SHA|BRANCH|TAG]
+cargo build --release --bin sui-node
+```
+
+The binary will be located at `./target/release/sui-node`.
+
+## Configuration
+
+### Download Required Files
+
+<Steps>
+  <Step title="Download the fullnode configuration template">
+    ```bash
+    wget https://github.com/MystenLabs/sui/raw/main/crates/sui-config/data/fullnode-template.yaml
+    ```
+  </Step>
+
+  <Step title="Download the genesis blob">
+    For mainnet:
+    ```bash
+    wget https://github.com/MystenLabs/sui-genesis/raw/main/mainnet/genesis.blob
+    ```
+
+    For testnet:
+    ```bash
+    wget https://github.com/MystenLabs/sui-genesis/raw/main/testnet/genesis.blob
+    ```
+
+    For devnet:
+    ```bash
+    wget https://github.com/MystenLabs/sui-genesis/raw/main/devnet/genesis.blob
+    ```
+  </Step>
+
+  <Step title="Update the configuration">
+    Edit `fullnode-template.yaml` to match your setup:
+
+    ```yaml
+    # Update this value to the location you want Sui to store its database
+    db-path: "/opt/sui/db"
+
+    # For ipv4, update this to "/ip4/X.X.X.X/tcp/8080/http"
+    network-address: "/dns/localhost/tcp/8080/http"
+    metrics-address: "0.0.0.0:9184"
+    # this address is also used for web socket connections
+    json-rpc-address: "0.0.0.0:9000"
+    enable-event-processing: true
+
+    p2p-config:
+      listen-address: "0.0.0.0:8084"
+      # add state-sync seed peers below
+      # seed-peers:
+
+    genesis:
+      # Update this to the location of where the genesis file is stored
+      genesis-file-location: "/opt/sui/config/genesis.blob"
+
+    authority-store-pruning-config:
+      num-latest-epoch-dbs-to-retain: 3
+      epoch-db-pruning-period-secs: 3600
+      num-epochs-to-retain: 1
+      max-checkpoints-in-batch: 10
+      max-transactions-in-batch: 1000
+      pruning-run-delay-seconds: 60
+
+    state-archive-read-config:
+        # Use https://checkpoints.mainnet.sui.io for mainnet
+        # Use https://checkpoints.testnet.sui.io for testnet
+        - ingestion-url: "https://checkpoints.mainnet.sui.io"
+          concurrency: 5
+    ```
+  </Step>
+</Steps>
+
+## Deployment Options
+
+### Using Docker Compose
+
+Create a `docker-compose.yaml` file:
+
+```yaml
+version: "3.9"
+services:
+  fullnode:
+    image: mysten/sui-node:mainnet-v1.19.1
+    ports:
+    - "8080:8080"
+    - "8084:8084/udp"
+    - "9000:9000"
+    - "9184:9184"
+    volumes:
+    - ./fullnode-template.yaml:/opt/sui/config/fullnode.yaml:ro
+    - ./genesis.blob:/opt/sui/config/genesis.blob:ro
+    - ./suidb:/opt/sui/db:rw
+    command: ["/opt/sui/bin/sui-node", "--config-path", "/opt/sui/config/fullnode.yaml"]
+volumes:
+  suidb:
+```
+
+Start the fullnode:
+
+```bash
+docker compose up -d
+```
+
+### Using Systemd
+
+<Steps>
+  <Step title="Create the sui user and directories">
+    ```bash
+    sudo useradd sui
+    sudo mkdir -p /opt/sui/bin
+    sudo mkdir -p /opt/sui/config
+    sudo mkdir -p /opt/sui/db
+    sudo chown -R sui:sui /opt/sui
+    ```
+  </Step>
+
+  <Step title="Copy configuration files">
+    ```bash
+    sudo cp fullnode-template.yaml /opt/sui/config/fullnode.yaml
+    sudo cp genesis.blob /opt/sui/config/
+    sudo chown -R sui:sui /opt/sui/config
+    ```
+  </Step>
+
+  <Step title="Create systemd service">
+    Create `/etc/systemd/system/sui-node.service`:
+
+    ```ini
+    [Unit]
+    Description=Sui Node
+
+    [Service]
+    User=sui
+    WorkingDirectory=/opt/sui/
+    Environment=RUST_BACKTRACE=1
+    Environment=RUST_LOG=info,sui_core=info,jsonrpsee=error
+    ExecStart=/opt/sui/bin/sui-node --config-path /opt/sui/config/fullnode.yaml
+    Restart=always
+
+    [Install]
+    WantedBy=multi-user.target
+    ```
+  </Step>
+
+  <Step title="Enable and start the service">
+    ```bash
+    sudo systemctl daemon-reload
+    sudo systemctl enable sui-node
+    sudo systemctl start sui-node
+    ```
+  </Step>
+</Steps>
+
+## Network Configuration
+
+Ensure the following ports are accessible:
+
+| Port | Protocol | Purpose |
+|------|----------|----------|
+| 8080 | TCP | Transaction and protocol interface |
+| 8084 | UDP | P2P state sync |
+| 9000 | TCP | JSON-RPC interface |
+| 9184 | TCP | Metrics (localhost only) |
+
+## Verification
+
+Check that the fullnode is running:
+
+```bash
+# For systemd
+sudo systemctl status sui-node
+
+# For Docker
+docker compose ps
+```
+
+Test the JSON-RPC interface:
+
+```bash
+curl -X POST http://localhost:9000 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "sui_getLatestCheckpointSequenceNumber",
+    "params": []
+  }'
+```
+
+Monitor synchronization progress:
+
+```bash
+curl -s http://localhost:9184/metrics | grep highest_synced_checkpoint
+```
+
+## Next Steps
+
+- Configure [monitoring](/operators/monitoring) for your fullnode
+- Set up [snapshots and backups](/operators/snapshots)
+- Review the [troubleshooting guide](/operators/troubleshooting) for common issues

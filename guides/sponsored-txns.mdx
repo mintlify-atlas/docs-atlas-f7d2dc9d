@@ -1,0 +1,76 @@
+---
+title: Sponsored Transactions
+description: Enable gasless transactions with transaction sponsorship
+---
+
+Sponsored transactions allow one account (sponsor) to pay gas fees for transactions executed by another account (user).
+
+## How It Works
+
+1. User creates and signs transaction
+2. Sponsor adds gas payment and signs
+3. Transaction executes with sponsor paying fees
+
+## Implementation
+
+### TypeScript
+
+```typescript
+import { Transaction } from '@mysten/sui/transactions';
+
+const userKeypair = /* user's keypair */;
+const sponsorKeypair = /* sponsor's keypair */;
+
+// User creates transaction
+const tx = new Transaction();
+tx.transferObjects(
+  [tx.splitCoins(tx.gas, [1000000])],
+  recipient
+);
+tx.setSender(userKeypair.getPublicKey().toSuiAddress());
+tx.setGasOwner(sponsorKeypair.getPublicKey().toSuiAddress());
+
+// User signs
+const userSignature = await userKeypair.signTransaction(
+  await tx.build({ client })
+);
+
+// Sponsor signs
+const sponsorSignature = await sponsorKeypair.signTransaction(
+  await tx.build({ client })
+);
+
+// Execute with both signatures
+const result = await client.executeTransactionBlock({
+  transactionBlock: await tx.build({ client }),
+  signature: [
+    userSignature.signature,
+    sponsorSignature.signature,
+  ],
+});
+```
+
+## Use Cases
+
+- **Onboarding**: New users without SUI tokens
+- **Gaming**: Players don't need crypto
+- **Enterprise**: Company pays fees for employees
+- **Gasless dApps**: Better UX
+
+## Benefits
+
+- Improved user experience
+- Lower barrier to entry
+- Flexible fee delegation
+- Enterprise-friendly
+
+## Considerations
+
+- Sponsor needs sufficient SUI balance
+- Both parties must sign transaction
+- Sponsor should validate transactions
+- Consider rate limiting
+
+## Learn More
+
+- [Sui sponsored transactions](https://docs.sui.io/concepts/transactions/sponsored-transactions)

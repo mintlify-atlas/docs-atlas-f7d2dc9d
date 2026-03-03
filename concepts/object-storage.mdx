@@ -1,0 +1,451 @@
+---
+title: Object Storage
+description: Understand how Sui stores objects, manages storage costs, and provides efficient data access.
+---
+
+Sui's storage model is designed around objects, with each object stored independently and accessed through its unique ID. This object-centric approach enables parallel execution and efficient state management.
+
+## Storage Architecture
+
+Sui uses a versioned object storage model where:
+
+<CardGroup cols={2}>
+  <Card title="Object-Based" icon="cube">
+    Each object is stored independently with its own version
+  </Card>
+  <Card title="Content-Addressed" icon="fingerprint">
+    Objects are referenced by ID and version number
+  </Card>
+  <Card title="Permanent History" icon="clock-rotate-left">
+    All object versions are retained for historical queries
+  </Card>
+  <Card title="Direct Access" icon="bolt">
+    Objects can be read directly without scanning
+  </Card>
+</CardGroup>
+
+## Object Serialization
+
+Objects are stored as BCS (Binary Canonical Serialization) bytes:
+
+```rust filename="crates/sui-types/src/object.rs"
+pub struct MoveObject {
+    /// The type of this object. Immutable
+    type_: MoveObjectType,
+    /// DEPRECATED this field is no longer used to determine whether a tx can transfer this
+    /// object. Instead, it is always calculated from the objects type when loaded in execution
+    has_public_transfer: bool,
+    /// Number that increases each time a tx takes this object as a mutable input
+    /// This is a lamport timestamp, not a sequentially increasing version
+    version: SequenceNumber,
+    /// BCS bytes of a Move struct value
+    contents: Vec<u8>,
+}
+```
+
+### Object Layout
+
+The first 32 bytes of an object's contents are always its ID:
+
+```rust filename="crates/sui-types/src/object.rs"
+/// Index marking the end of the object's ID + the beginning of its version
+pub const ID_END_INDEX: usize = ObjectID::LENGTH;
+
+pub fn id(&self) -> ObjectID {
+    Self::id_opt(&self.contents).unwrap()
+}
+
+pub fn id_opt(contents: &[u8]) -> Result<ObjectID, ObjectIDParseError> {
+    if ID_END_INDEX > contents.len() {
+        return Err(ObjectIDParseError::TryFromSliceError);
+    }
+    ObjectID::try_from(&contents[0..ID_END_INDEX])
+}
+```
+
+<Note>
+  This predictable layout allows Sui to efficiently extract object IDs without deserializing the entire object.
+</Note>
+
+## Storage Costs
+
+Sui implements a storage fund mechanism to ensure sustainable long-term storage:
+
+### Storage Rebate System
+
+From the storage fund implementation:
+
+```move filename="crates/sui-framework/packages/sui-system/sources/storage_fund.move"
+/// Struct representing the storage fund, containing two `Balance`s:
+/// - `total_object_storage_rebates` has the invariant that it's the sum of `storage_rebate` of
+///    all objects currently stored on-chain. To maintain this invariant, the only inflow of this
+///    balance is storage charges collected from transactions, and the only outflow is storage rebates
+///    of transactions, including both the portion refunded to the transaction senders as well as
+///    the non-refundable portion taken out and put into `non_refundable_balance`.
+/// - `non_refundable_balance` contains any remaining inflow of the storage fund that should not
+///    be taken out of the fund.
+public struct StorageFund has store {
+    total_object_storage_rebates: Balance<SUI>,
+    non_refundable_balance: Balance<SUI>,
+}
+```
+
+### How Storage Charges Work
+
+<Tabs>
+  <Tab title="Creating Objects">
+    When you create an object, you pay for its storage:
+    
+    ```move
+    // Storage cost is charged based on object size
+    storage_cost = object_size_bytes * storage_price_per_byte
+    ```
+    
+    This cost is held in the storage fund as a rebate for when the object is deleted.
+  </Tab>
+  
+  <Tab title="Modifying Objects">
+    When modifying an object:
+    1. Old version's storage rebate is released
+    2. New version's storage cost is charged
+    3. Net difference is the actual cost
+    
+    ```move
+    net_cost = new_storage_cost - old_storage_rebate
+    ```
+  </Tab>
+  
+  <Tab title="Deleting Objects">
+    When you delete an object, you receive most of the storage rebate:
+    
+    ```move filename="crates/sui-framework/packages/sui-system/sources/storage_fund.move"
+    public(package) fun advance_epoch(
+        self: &mut StorageFund,
+        storage_charges: Balance<SUI>,
+        storage_fund_reinvestment: Balance<SUI>,
+        leftover_staking_rewards: Balance<SUI>,
+        storage_rebate_amount: u64,
+        non_refundable_storage_fee_amount: u64,
+    ): Balance<SUI> {
+        // Split out the non-refundable portion of the storage rebate
+        let non_refundable_storage_fee = self
+            .total_object_storage_rebates
+            .split(non_refundable_storage_fee_amount);
+        
+        self.non_refundable_balance.join(non_refundable_storage_fee);
+        
+        // Return the refundable portion
+        let storage_rebate = self.total_object_storage_rebates.split(storage_rebate_amount);
+        storage_rebate
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  A small portion of the storage rebate is non-refundable and goes to the storage fund to ensure long-term sustainability.
+</Warning>
+
+## Object Size Limits
+
+Sui enforces maximum object sizes to ensure efficient processing:
+
+```rust filename="crates/sui-types/src/object.rs"
+pub unsafe fn new_from_execution_with_limit(
+    type_: MoveObjectType,
+    has_public_transfer: bool,
+    version: SequenceNumber,
+    contents: Vec<u8>,
+    max_move_object_size: u64,
+) -> Result<Self, ExecutionError> {
+    if contents.len() as u64 > max_move_object_size {
+        return Err(ExecutionError::from_kind(
+            ExecutionErrorKind::MoveObjectTooBig {
+                object_size: contents.len() as u64,
+                max_object_size: max_move_object_size,
+            },
+        ));
+    }
+    Ok(Self {
+        type_,
+        has_public_transfer,
+        version,
+        contents,
+    })
+}
+```
+
+### System Object Exception
+
+```rust filename="crates/sui-types/src/object.rs"
+let bound = if protocol_config.allow_unbounded_system_objects() && system_mutation {
+    if contents.len() as u64 > protocol_config.max_move_object_size() {
+        debug_fatal!(
+            "System created object (ID = {:?}) of type {:?} and size {} exceeds normal max size {}",
+            MoveObject::id_opt(&contents).ok(),
+            type_,
+            contents.len(),
+            protocol_config.max_move_object_size()
+        );
+    }
+    u64::MAX
+} else {
+    protocol_config.max_move_object_size()
+};
+```
+
+System objects can exceed normal size limits when `allow_unbounded_system_objects` is enabled.
+
+## Optimized Storage for Coins
+
+Coins have a special optimized storage format:
+
+```rust filename="crates/sui-types/src/object.rs"
+pub fn new_gas_coin(version: SequenceNumber, id: ObjectID, value: u64) -> Self {
+    unsafe {
+        Self::new_from_execution_with_limit(
+            GasCoin::type_().into(),
+            true,
+            version,
+            GasCoin::new(id, value).to_bcs_bytes(),
+            256,
+        )
+        .unwrap()
+    }
+}
+
+/// Return the `value: u64` field of a `Coin<T>` type.
+/// Useful for reading the coin without deserializing the object into a Move value
+pub fn get_coin_value_unsafe(&self) -> u64 {
+    debug_assert!(self.type_.is_coin());
+    // 32 bytes for object ID, 8 for balance
+    debug_assert!(self.contents.len() == 40);
+    u64::from_le_bytes(<[u8; 8]>::try_from(&self.contents[ID_END_INDEX..]).unwrap())
+}
+
+/// Update the `value: u64` field of a `Coin<T>` type.
+pub fn set_coin_value_unsafe(&mut self, value: u64) {
+    debug_assert!(self.type_.is_coin());
+    // 32 bytes for object ID, 8 for balance
+    debug_assert!(self.contents.len() == 40);
+    self.contents.splice(ID_END_INDEX.., value.to_le_bytes());
+}
+```
+
+<Accordion title="Why Coins are Special">
+  Coins always have a fixed 40-byte structure:
+  - 32 bytes: Object ID
+  - 8 bytes: Balance (u64)
+  
+  This allows Sui to read and update coin balances without full deserialization, significantly improving performance for common operations like transfers and merges.
+</Accordion>
+
+## Dynamic Fields and Storage
+
+Dynamic fields are stored as separate child objects:
+
+```move filename="crates/sui-framework/packages/sui-framework/sources/dynamic_field.move"
+/// Internal object used for storing the field and value
+public struct Field<Name: copy + drop + store, Value: store> has key {
+    /// Determined by the hash of the object ID, the field name value and it's type,
+    /// i.e. hash(parent.id || name || Name)
+    id: UID,
+    /// The value for the name of this field
+    name: Name,
+    /// The value bound to this field
+    value: Value,
+}
+```
+
+### Storage Benefits
+
+<CardGroup cols={2}>
+  <Card title="Bypass Size Limits" icon="expand">
+    Store unlimited data by splitting across dynamic fields
+  </Card>
+  <Card title="Efficient Updates" icon="gauge-high">
+    Modify individual fields without touching parent object
+  </Card>
+  <Card title="Selective Loading" icon="filter">
+    Load only the fields you need
+  </Card>
+  <Card title="Granular Rebates" icon="coins">
+    Receive storage rebates when removing fields
+  </Card>
+</CardGroup>
+
+## Storage Patterns
+
+### Small Objects
+
+For small, frequently accessed data, use direct struct fields:
+
+```move
+public struct Profile has key {
+    id: UID,
+    name: String,
+    avatar_url: String,
+    created_at: u64,
+}
+```
+
+**Best for**: User profiles, NFT metadata, configuration
+
+### Large Collections
+
+For large collections, use dynamic fields or Table:
+
+```move
+use sui::table::{Self, Table};
+
+public struct GameWorld has key {
+    id: UID,
+    // Each player stored as separate object via Table
+    players: Table<address, PlayerData>,
+}
+```
+
+**Best for**: Leaderboards, registries, mappings
+
+### Hierarchical Data
+
+For nested structures, use object wrapping or dynamic object fields:
+
+```move
+public struct Company has key {
+    id: UID,
+    name: String,
+}
+
+public struct Department has key, store {
+    id: UID,
+    company_id: ID,
+    employees: vector<address>,
+}
+
+public fun add_department(company: &mut Company, dept: Department) {
+    dynamic_object_field::add(&mut company.id, dept.name, dept);
+}
+```
+
+**Best for**: Organizations, complex game structures
+
+## Object Versioning
+
+Sui maintains a complete version history of all objects:
+
+```rust filename="crates/sui-types/src/object.rs"
+/// Sets the version of this object to a new value which is assumed to be higher (and checked to
+/// be higher in debug mode).
+pub fn set_version(&mut self, version: SequenceNumber) {
+    #[cfg(debug_assertions)]
+    {
+        let prev_version = self.version;
+        if prev_version >= version {
+            panic!(
+                "Cannot set version backwards: {} -> {}",
+                prev_version, version
+            );
+        }
+    }
+    self.version = version;
+}
+```
+
+### Querying Historical State
+
+You can query any past version of an object if you know its version number. This is useful for:
+- Auditing changes
+- Replaying transactions
+- Historical analysis
+- Debugging
+
+## Storage Best Practices
+
+<AccordionGroup>
+  <Accordion title="Minimize object size">
+    Smaller objects mean lower storage costs:
+    
+    ```move
+    // Bad: Storing redundant data
+    public struct BadNFT has key {
+        id: UID,
+        owner: address,  // Redundant - already tracked by Sui
+        name: String,
+        description: String,
+        full_image_data: vector<u8>,  // Store off-chain instead
+    }
+    
+    // Good: Lean on-chain storage
+    public struct GoodNFT has key {
+        id: UID,
+        name: String,
+        description: String,
+        image_url: String,  // Reference to off-chain storage
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Use appropriate data structures">
+    Choose the right structure for your access patterns:
+    
+    - **Direct fields**: Fast, fixed-size data
+    - **Dynamic fields**: Flexible, variable-size data
+    - **Table**: Large key-value collections
+    - **Bag**: Heterogeneous collections
+  </Accordion>
+  
+  <Accordion title="Clean up unused objects">
+    Delete objects when no longer needed to recover storage rebates:
+    
+    ```move
+    public fun cleanup(old_obj: OldObject) {
+        let OldObject { id, .. } = old_obj;
+        id.delete();  // Recover storage rebate
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Consider off-chain storage">
+    For large data (images, documents), store only URLs or hashes on-chain:
+    
+    ```move
+    public struct Document has key {
+        id: UID,
+        title: String,
+        ipfs_hash: String,  // Content stored on IPFS
+        created_at: u64,
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Storage Fund Economics
+
+```move filename="crates/sui-framework/packages/sui-system/sources/storage_fund.move"
+public fun total_object_storage_rebates(self: &StorageFund): u64 {
+    self.total_object_storage_rebates.value()
+}
+
+public fun total_balance(self: &StorageFund): u64 {
+    self.total_object_storage_rebates.value() + self.non_refundable_balance.value()
+}
+```
+
+The storage fund balances:
+- **Total Object Storage Rebates**: Sum of all storage rebates for active objects
+- **Non-Refundable Balance**: Accumulated fees that fund long-term storage
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="Objects" href="/concepts/objects" icon="cube">
+    Understand the object model
+  </Card>
+  <Card title="Dynamic Fields" href="/concepts/dynamic-fields" icon="layer-group">
+    Extend objects at runtime
+  </Card>
+  <Card title="Gas Mechanism" href="/concepts/gas-mechanism" icon="gas-pump">
+    Learn about gas and storage costs
+  </Card>
+</CardGroup>

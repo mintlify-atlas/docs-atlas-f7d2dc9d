@@ -1,0 +1,345 @@
+---
+title: TransactionBuilder
+description: Build transactions programmatically with the Rust SDK
+---
+
+The `TransactionBuilder` provides a high-level API for constructing Sui transaction blocks. It's available through `sui.transaction_builder()`.
+
+## Overview
+
+The TransactionBuilder wraps the lower-level transaction building logic and provides convenience methods for common operations:
+
+```rust
+use sui_sdk::SuiClientBuilder;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default().build_mainnet().await?;
+    let tx_builder = sui.transaction_builder();
+    
+    // Use tx_builder to build transactions
+    
+    Ok(())
+}
+```
+
+## Building Transactions
+
+The TransactionBuilder is defined in the `sui-transaction-builder` crate and provides methods from the `sui_transaction_builder::TransactionBuilder` struct.
+
+### Accessing the Builder
+
+```rust
+let tx_builder = sui.transaction_builder();
+```
+
+The transaction builder requires a `DataReader` implementation (provided by `ReadApi`) to fetch necessary on-chain data while building transactions.
+
+## Common Transaction Patterns
+
+### Transfer Objects
+
+```rust
+use sui_types::base_types::{ObjectID, SuiAddress};
+
+// The TransactionBuilder provides building blocks
+// For transfers, you typically use TransactionData directly
+
+use sui_types::transaction::TransactionData;
+use sui_types::programmable_transaction_builder::ProgrammableTransactionBuilder;
+
+let mut ptb = ProgrammableTransactionBuilder::new();
+
+// Transfer object
+ptb.transfer_object(recipient, object_arg)?;
+
+let pt = ptb.finish();
+
+let tx_data = TransactionData::new_programmable(
+    sender,
+    vec![gas_coin],
+    pt,
+    gas_budget,
+    gas_price,
+);
+```
+
+### Split and Transfer Coins
+
+```rust
+use sui_types::programmable_transaction_builder::ProgrammableTransactionBuilder;
+
+let mut ptb = ProgrammableTransactionBuilder::new();
+
+// Split coin
+let coin_arg = ptb.input(CallArg::Object(ObjectArg::ImmOrOwnedObject(
+    /* coin object ref */
+)))?;
+
+let amounts = vec![1_000_000_000]; // 1 SUI in MIST
+let split_coins = ptb.command(Command::SplitCoins(
+    coin_arg,
+    amounts.into_iter().map(|a| ptb.pure(a).unwrap()).collect()
+));
+
+// Transfer split coin
+ptb.command(Command::TransferObjects(
+    vec![split_coins],
+    ptb.input(CallArg::Pure(bcs::to_bytes(&recipient)?))?
+));
+
+let pt = ptb.finish();
+```
+
+### Move Calls
+
+```rust
+use sui_types::programmable_transaction_builder::ProgrammableTransactionBuilder;
+use sui_types::{Identifier, TypeTag};
+use move_core_types::language_storage::StructTag;
+
+let mut ptb = ProgrammableTransactionBuilder::new();
+
+// Call Move function
+let package_id = ObjectID::from_hex_literal("0x2")?;
+let module = Identifier::new("pay")?;
+let function = Identifier::new("split")?;
+let type_args = vec![];
+let call_args = vec![
+    /* arguments */
+];
+
+ptb.command(Command::MoveCall(Box::new(ProgrammableMoveCall {
+    package: package_id,
+    module,
+    function,
+    type_arguments: type_args,
+    arguments: call_args,
+})));
+
+let pt = ptb.finish();
+```
+
+## Working with Programmable Transaction Blocks
+
+Sui's programmable transaction blocks allow composing multiple operations:
+
+```rust
+use sui_types::programmable_transaction_builder::ProgrammableTransactionBuilder;
+use sui_types::transaction::{Argument, CallArg, Command, ObjectArg};
+
+let mut ptb = ProgrammableTransactionBuilder::new();
+
+// Input coins
+let coin1 = ptb.input(CallArg::Object(ObjectArg::ImmOrOwnedObject(
+    (coin1_id, coin1_version, coin1_digest)
+)))?;
+
+let coin2 = ptb.input(CallArg::Object(ObjectArg::ImmOrOwnedObject(
+    (coin2_id, coin2_version, coin2_digest)
+)))?;
+
+// Merge coins
+ptb.command(Command::MergeCoins(coin1, vec![coin2]));
+
+// Split amount
+let amount = ptb.pure(1_000_000_000u64)?;
+let split_coin = ptb.command(Command::SplitCoins(coin1, vec![amount]));
+
+// Transfer split coin
+let recipient_arg = ptb.pure(recipient)?;
+ptb.command(Command::TransferObjects(
+    vec![split_coin],
+    recipient_arg
+));
+
+let pt = ptb.finish();
+
+// Create transaction data
+let tx_data = TransactionData::new_programmable(
+    sender,
+    vec![gas_payment],
+    pt,
+    gas_budget,
+    gas_price,
+);
+```
+
+## Gas Management
+
+### Selecting Gas Coins
+
+Use the CoinReadApi to select appropriate gas coins:
+
+```rust
+// Select coins for gas
+let gas_coins = sui.coin_read_api()
+    .select_coins(
+        sender,
+        None, // SUI
+        gas_budget,
+        vec![] // exclude
+    )
+    .await?;
+
+let gas_coin = gas_coins.first()
+    .ok_or_else(|| anyhow::anyhow!("No gas coins available"))?;
+
+let gas_payment = (gas_coin.coin_object_id, gas_coin.version, gas_coin.digest);
+```
+
+### Getting Gas Price
+
+```rust
+// Get current reference gas price
+let gas_price = sui.read_api()
+    .get_reference_gas_price()
+    .await?;
+
+println!("Gas price: {} MIST", gas_price);
+```
+
+## Signing Transactions
+
+After building the transaction data, sign it:
+
+```rust
+use sui_types::crypto::{SuiKeyPair, Signature};
+use sui_types::transaction::Transaction;
+
+// Create transaction data
+let tx_data = /* ... */;
+
+// Sign with keypair
+let keypar: SuiKeyPair = /* your keypair */;
+let signature = Signature::new_secure(
+    &IntentMessage::new(Intent::sui_transaction(), tx_data.clone()),
+    &keypair
+);
+
+let signed_tx = Transaction::from_data(tx_data, vec![signature]);
+```
+
+## Complete Example: Transfer SUI
+
+```rust
+use sui_sdk::SuiClientBuilder;
+use sui_types::transaction::{
+    TransactionData, Transaction, Command, Argument, CallArg,
+};
+use sui_types::programmable_transaction_builder::ProgrammableTransactionBuilder;
+use sui_types::base_types::SuiAddress;
+use sui_types::crypto::{SuiKeyPair, Signature};
+use std::str::FromStr;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default().build_mainnet().await?;
+    
+    let sender = SuiAddress::from_str("0x...")?;
+    let recipient = SuiAddress::from_str("0x...")?;
+    let amount = 1_000_000_000u64; // 1 SUI
+    
+    // Get gas price
+    let gas_price = sui.read_api().get_reference_gas_price().await?;
+    let gas_budget = 10_000_000; // 0.01 SUI
+    
+    // Select gas coin
+    let gas_coins = sui.coin_read_api()
+        .select_coins(sender, None, gas_budget + amount, vec![])
+        .await?;
+    
+    let gas_coin = gas_coins.first().unwrap();
+    let gas_payment = (gas_coin.coin_object_id, gas_coin.version, gas_coin.digest);
+    
+    // Build programmable transaction
+    let mut ptb = ProgrammableTransactionBuilder::new();
+    
+    // Split coin
+    let coin_arg = Argument::GasCoin;
+    let amount_arg = ptb.pure(amount)?;
+    let split_coin = ptb.command(Command::SplitCoins(coin_arg, vec![amount_arg]));
+    
+    // Transfer
+    let recipient_arg = ptb.pure(recipient)?;
+    ptb.command(Command::TransferObjects(vec![split_coin], recipient_arg));
+    
+    let pt = ptb.finish();
+    
+    // Create transaction data
+    let tx_data = TransactionData::new_programmable(
+        sender,
+        vec![gas_payment],
+        pt,
+        gas_budget,
+        gas_price,
+    );
+    
+    // Sign transaction
+    let keypair: SuiKeyPair = /* load your keypair */;
+    let signature = Signature::new_secure(
+        &IntentMessage::new(Intent::sui_transaction(), tx_data.clone()),
+        &keypair
+    );
+    
+    let signed_tx = Transaction::from_data(tx_data, vec![signature]);
+    
+    // Execute
+    let response = sui.quorum_driver_api()
+        .execute_transaction_block(
+            signed_tx,
+            SuiTransactionBlockResponseOptions::default()
+                .with_effects()
+                .with_events(),
+            None
+        )
+        .await?;
+    
+    println!("Transaction executed: {}", response.digest);
+    
+    Ok(())
+}
+```
+
+## DataReader Trait
+
+The `TransactionBuilder` uses the `DataReader` trait to fetch on-chain data:
+
+```rust
+pub trait DataReader {
+    async fn get_owned_objects(
+        &self,
+        address: SuiAddress,
+        object_type: StructTag,
+    ) -> Result<Vec<ObjectInfo>, anyhow::Error>;
+    
+    async fn get_object(
+        &self,
+        object_id: ObjectID,
+    ) -> Result<Object, anyhow::Error>;
+    
+    async fn get_reference_gas_price(&self) -> Result<u64, anyhow::Error>;
+}
+```
+
+The `ReadApi` implements this trait, enabling the builder to automatically fetch necessary data.
+
+## Best Practices
+
+1. **Gas Estimation**: Always dry-run transactions to estimate gas costs:
+   ```rust
+   let dry_run = sui.read_api().dry_run_transaction_block(tx_data).await?;
+   let gas_used = dry_run.effects.gas_used();
+   ```
+
+2. **Error Handling**: Check object ownership and versions before building:
+   ```rust
+   let obj = sui.read_api().get_object_with_options(object_id, options).await?;
+   if obj.owner() != Some(sender) {
+       return Err(anyhow::anyhow!("Not object owner"));
+   }
+   ```
+
+3. **Gas Budget**: Set appropriate gas budgets based on transaction complexity
+
+4. **Programmable Transactions**: Use PTBs to batch multiple operations efficiently

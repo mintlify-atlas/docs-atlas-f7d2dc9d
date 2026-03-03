@@ -1,0 +1,407 @@
+---
+title: GraphQL Subscriptions
+description: Real-time updates via GraphQL subscriptions
+---
+
+GraphQL subscriptions enable real-time updates for blockchain data. Subscribe to events, transactions, and state changes as they occur.
+
+## WebSocket Connection
+
+Subscriptions require a WebSocket connection to the GraphQL endpoint:
+
+**Mainnet:**
+```
+wss://sui-mainnet.mystenlabs.com/graphql
+```
+
+**Testnet:**
+```
+wss://sui-testnet.mystenlabs.com/graphql
+```
+
+**Devnet:**
+```
+wss://sui-devnet.mystenlabs.com/graphql
+```
+
+## Event Subscriptions
+
+### Subscribe to All Events
+
+```graphql
+subscription {
+  events {
+    sendingModule {
+      package {
+        address
+      }
+      name
+    }
+    type {
+      repr
+    }
+    sender {
+      address
+    }
+    timestamp
+    json
+    bcs
+    
+    transactionBlock {
+      digest
+    }
+  }
+}
+```
+
+### Subscribe to Events by Type
+
+```graphql
+subscription SubscribeToEventType($type: String!) {
+  events(filter: { eventType: $type }) {
+    sendingModule {
+      name
+    }
+    type {
+      repr
+    }
+    sender {
+      address
+    }
+    json
+    timestamp
+  }
+}
+```
+
+Variables:
+```json
+{
+  "type": "0x2::coin::CoinCreated<0x2::sui::SUI>"
+}
+```
+
+### Subscribe to Events from Package
+
+```graphql
+subscription SubscribeToPackageEvents($package: SuiAddress!) {
+  events(filter: { emittingPackage: $package }) {
+    sendingModule {
+      name
+    }
+    type {
+      repr
+    }
+    json
+    transactionBlock {
+      digest
+      sender {
+        address
+      }
+    }
+  }
+}
+```
+
+### Subscribe to Events from Sender
+
+```graphql
+subscription SubscribeToSenderEvents($sender: SuiAddress!) {
+  events(filter: { sender: $sender }) {
+    type {
+      repr
+    }
+    json
+    timestamp
+    transactionBlock {
+      digest
+    }
+  }
+}
+```
+
+## Transaction Subscriptions
+
+### Subscribe to Transaction Effects
+
+```graphql
+subscription {
+  transactionBlocks {
+    digest
+    sender {
+      address
+    }
+    effects {
+      status
+      timestamp
+      checkpoint {
+        sequenceNumber
+      }
+      
+      gasEffects {
+        gasSummary {
+          computationCost
+          storageCost
+          storageRebate
+        }
+      }
+      
+      balanceChanges {
+        nodes {
+          owner {
+            address
+          }
+          amount
+          coinType {
+            repr
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### Subscribe to Transactions by Sender
+
+```graphql
+subscription SubscribeToSenderTransactions($sender: SuiAddress!) {
+  transactionBlocks(filter: { signAddress: $sender }) {
+    digest
+    effects {
+      status
+      timestamp
+    }
+  }
+}
+```
+
+### Subscribe to Transactions Affecting Address
+
+```graphql
+subscription SubscribeToAddressTransactions(
+  $address: SuiAddress!
+) {
+  transactionBlocks(filter: { affectedAddress: $address }) {
+    digest
+    sender {
+      address
+    }
+    effects {
+      status
+      timestamp
+      balanceChanges {
+        nodes {
+          owner {
+            address
+          }
+          amount
+          coinType {
+            repr
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+## JavaScript/TypeScript Client
+
+### Using graphql-ws
+
+```typescript
+import { createClient } from 'graphql-ws';
+import WebSocket from 'ws';
+
+const client = createClient({
+  url: 'wss://sui-mainnet.mystenlabs.com/graphql',
+  webSocketImpl: WebSocket,
+});
+
+const subscription = client.subscribe(
+  {
+    query: `
+      subscription {
+        events(filter: { eventType: "0x2::coin::CoinCreated" }) {
+          type { repr }
+          json
+          timestamp
+        }
+      }
+    `,
+  },
+  {
+    next: (data) => {
+      console.log('Event:', data);
+    },
+    error: (error) => {
+      console.error('Subscription error:', error);
+    },
+    complete: () => {
+      console.log('Subscription complete');
+    },
+  }
+);
+
+// Unsubscribe later
+// subscription();
+```
+
+### Using Apollo Client
+
+```typescript
+import { ApolloClient, InMemoryCache, split, HttpLink } from '@apollo/client';
+import { GraphQLWsLink } from '@apollo/client/link/subscriptions';
+import { getMainDefinition } from '@apollo/client/utilities';
+import { createClient } from 'graphql-ws';
+
+const httpLink = new HttpLink({
+  uri: 'https://sui-mainnet.mystenlabs.com/graphql',
+});
+
+const wsLink = new GraphQLWsLink(
+  createClient({
+    url: 'wss://sui-mainnet.mystenlabs.com/graphql',
+  })
+);
+
+const splitLink = split(
+  ({ query }) => {
+    const definition = getMainDefinition(query);
+    return (
+      definition.kind === 'OperationDefinition' &&
+      definition.operation === 'subscription'
+    );
+  },
+  wsLink,
+  httpLink
+);
+
+const client = new ApolloClient({
+  link: splitLink,
+  cache: new InMemoryCache(),
+});
+
+// Use in React component
+import { useSubscription, gql } from '@apollo/client';
+
+const EVENTS_SUBSCRIPTION = gql`
+  subscription OnNewEvents {
+    events {
+      type { repr }
+      json
+    }
+  }
+`;
+
+function EventsComponent() {
+  const { data, loading, error } = useSubscription(EVENTS_SUBSCRIPTION);
+  
+  if (loading) return <p>Loading...</p>;
+  if (error) return <p>Error: {error.message}</p>;
+  
+  return <div>{JSON.stringify(data)}</div>;
+}
+```
+
+## Rust Client Example
+
+Using the `graphql-ws-client` crate:
+
+```rust
+use graphql_ws_client::{Client, SubscriptionStream};
+use serde_json::json;
+use futures::StreamExt;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::build("wss://sui-mainnet.mystenlabs.com/graphql")
+        .await?;
+    
+    let subscription = client.subscribe(
+        json!({
+            "query": "subscription { events { type { repr } json } }"
+        })
+    ).await?;
+    
+    let mut stream = SubscriptionStream::new(subscription);
+    
+    while let Some(result) = stream.next().await {
+        match result {
+            Ok(data) => println!("Event: {:?}", data),
+            Err(e) => eprintln!("Error: {}", e),
+        }
+    }
+    
+    Ok(())
+}
+```
+
+## Best Practices
+
+### Reconnection Logic
+
+Implement automatic reconnection for WebSocket disconnects:
+
+```typescript
+function createResilientClient() {
+  return createClient({
+    url: 'wss://sui-mainnet.mystenlabs.com/graphql',
+    retryAttempts: Infinity,
+    retryWait: async (retries) => {
+      // Exponential backoff
+      await new Promise(resolve =>
+        setTimeout(resolve, Math.min(1000 * 2 ** retries, 30000))
+      );
+    },
+  });
+}
+```
+
+### Error Handling
+
+Handle subscription errors gracefully:
+
+```typescript
+client.subscribe(
+  { query: '...' },
+  {
+    next: (data) => handleData(data),
+    error: (error) => {
+      console.error('Subscription error:', error);
+      // Implement retry logic or alert user
+    },
+    complete: () => {
+      console.log('Subscription ended');
+      // Reconnect if unexpected
+    },
+  }
+);
+```
+
+### Resource Management
+
+Always clean up subscriptions:
+
+```typescript
+const unsubscribe = client.subscribe(...);
+
+// Clean up when done
+window.addEventListener('beforeunload', () => {
+  unsubscribe();
+});
+```
+
+## Rate Limits
+
+Subscriptions are subject to rate limits:
+
+- Maximum **10 concurrent subscriptions** per connection
+- Messages throttled to prevent flooding
+- Automatic disconnection if limits exceeded
+
+For production use:
+- Run your own indexer with GraphQL
+- Use managed RPC providers with higher limits
+- Implement client-side throttling

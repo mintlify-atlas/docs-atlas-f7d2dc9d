@@ -1,0 +1,451 @@
+---
+title: Creating Custom Objects
+description: Learn how to define and work with custom objects on Sui
+---
+
+Objects are the fundamental units of storage on Sui. This guide covers how to create custom objects with different properties and behaviors.
+
+## Object Basics
+
+All objects on Sui must have a unique identifier (UID) and the `key` ability.
+
+### Minimal Object
+
+```move
+module my_package::basic {
+    use sui::object::{Self, UID};
+
+    public struct BasicObject has key {
+        id: UID,
+    }
+
+    public fun create(ctx: &mut TxContext): BasicObject {
+        BasicObject {
+            id: object::new(ctx),
+        }
+    }
+}
+```
+
+## Object Abilities
+
+Abilities define what operations can be performed on a struct.
+
+### The Four Abilities
+
+- **`key`**: Can be used as a top-level object (required for all Sui objects)
+- **`store`**: Can be stored inside other objects
+- **`copy`**: Can be copied
+- **`drop`**: Can be discarded/destroyed implicitly
+
+### Common Ability Combinations
+
+```move
+// Standard owned object
+public struct OwnedNFT has key, store {
+    id: UID,
+    name: String,
+}
+
+// Cannot be stored (soulbound)
+public struct SoulboundBadge has key {
+    id: UID,
+    owner: address,
+}
+
+// Can be copied (witness pattern)
+public struct Witness has drop {}
+
+// Inner object (can be stored)
+public struct Metadata has store {
+    name: String,
+    value: u64,
+}
+```
+
+## Object Types
+
+### Owned Objects
+
+Objects owned by an address. This is the most common type.
+
+From `examples/move/nft`:
+
+```move
+module examples::testnet_nft {
+    use std::string;
+    use sui::url::{Self, Url};
+
+    public struct TestnetNFT has key, store {
+        id: UID,
+        name: string::String,
+        description: string::String,
+        url: Url,
+    }
+
+    public fun mint_to_sender(
+        name: vector<u8>,
+        description: vector<u8>,
+        url: vector<u8>,
+        ctx: &mut TxContext,
+    ) {
+        let sender = ctx.sender();
+        let nft = TestnetNFT {
+            id: object::new(ctx),
+            name: string::utf8(name),
+            description: string::utf8(description),
+            url: url::new_unsafe_from_bytes(url),
+        };
+        transfer::public_transfer(nft, sender);
+    }
+}
+```
+
+### Nested Objects
+
+Objects can contain other objects with the `store` ability:
+
+```move
+module my_package::nested {
+    public struct Metadata has store {
+        title: String,
+        creator: address,
+    }
+
+    public struct NFT has key, store {
+        id: UID,
+        metadata: Metadata,  // Nested object
+        attributes: vector<Attribute>,
+    }
+
+    public struct Attribute has store {
+        key: String,
+        value: String,
+    }
+}
+```
+
+### Objects with Options
+
+```move
+module my_package::inventory {
+    use sui::object::UID;
+
+    public struct Hero has key, store {
+        id: UID,
+        health: u64,
+        sword: Option<Sword>,  // May or may not have a sword
+    }
+
+    public struct Sword has key, store {
+        id: UID,
+        strength: u64,
+    }
+
+    public fun equip(hero: &mut Hero, sword: Sword) {
+        assert!(hero.sword.is_none(), EAlreadyEquipped);
+        hero.sword.fill(sword);
+    }
+
+    public fun unequip(hero: &mut Hero): Sword {
+        assert!(hero.sword.is_some(), ENotEquipped);
+        option::extract(&mut hero.sword)
+    }
+}
+```
+
+## Real-World Example: Game Characters
+
+From `examples/move/hero`:
+
+```move
+module hero::example {
+    use sui::balance::{Self, Balance};
+    use sui::coin::{Self, Coin};
+    use sui::sui::SUI;
+
+    /// Game character with attributes and inventory
+    public struct Hero has key, store {
+        id: UID,
+        game_id: ID,
+        health: u64,
+        experience: u64,
+        sword: Option<Sword>,
+    }
+
+    /// Weapon with magic and strength
+    public struct Sword has key, store {
+        id: UID,
+        game_id: ID,
+        magic: u64,
+        strength: u64,
+    }
+
+    /// Consumable healing item
+    public struct Potion has key, store {
+        id: UID,
+        game_id: ID,
+        potency: u64,
+    }
+
+    /// Enemy to fight
+    public struct Boar has key, store {
+        id: UID,
+        game_id: ID,
+        health: u64,
+        strength: u64,
+    }
+
+    /// Game state (shared object)
+    public struct Game has key {
+        id: UID,
+        payments: Balance<SUI>,
+    }
+
+    const MAX_HP: u64 = 1000;
+    const MAX_MAGIC: u64 = 10;
+    const MIN_SWORD_COST: u64 = 100;
+
+    /// Create a sword - payment determines magic level
+    public fun new_sword(
+        game: &mut Game,
+        payment: Coin<SUI>,
+        ctx: &mut TxContext
+    ): Sword {
+        let value = payment.value();
+        assert!(value >= MIN_SWORD_COST, EInsufficientFunds);
+
+        coin::put(&mut game.payments, payment);
+
+        let magic = (value - MIN_SWORD_COST) / MIN_SWORD_COST;
+        Sword {
+            id: object::new(ctx),
+            magic: magic.min(MAX_MAGIC),
+            strength: 1,
+            game_id: object::id(game),
+        }
+    }
+
+    /// Create a hero with a sword
+    public fun new_hero(sword: Sword, ctx: &mut TxContext): Hero {
+        Hero {
+            id: object::new(ctx),
+            game_id: sword.game_id,
+            health: 100,
+            experience: 0,
+            sword: option::some(sword),
+        }
+    }
+
+    /// Heal hero with potion
+    public fun heal(hero: &mut Hero, potion: Potion) {
+        let Potion { id, potency, game_id } = potion;
+        id.delete();
+
+        assert!(hero.game_id == game_id, EWrongGame);
+        hero.health = (hero.health + potency).min(MAX_HP);
+    }
+
+    /// Equip sword to hero
+    public fun equip(hero: &mut Hero, sword: Sword) {
+        assert!(hero.sword.is_none(), EAlreadyEquipped);
+        hero.sword.fill(sword);
+    }
+
+    /// Remove sword from hero
+    public fun unequip(hero: &mut Hero): Sword {
+        assert!(hero.sword.is_some(), ENotEquipped);
+        option::extract(&mut hero.sword)
+    }
+}
+```
+
+## Object Transfer Patterns
+
+### Direct Transfer
+
+```move
+public fun transfer_nft(nft: NFT, recipient: address) {
+    transfer::public_transfer(nft, recipient);
+}
+```
+
+### Transfer with Custom Logic
+
+```move
+public fun transfer_with_fee(
+    nft: NFT,
+    recipient: address,
+    fee: Coin<SUI>,
+    fee_collector: address,
+) {
+    // Collect fee
+    transfer::public_transfer(fee, fee_collector);
+    // Transfer NFT
+    transfer::public_transfer(nft, recipient);
+}
+```
+
+### Freeze Object
+
+Make an object immutable:
+
+```move
+public fun create_immutable_config(ctx: &mut TxContext) {
+    let config = Config {
+        id: object::new(ctx),
+        value: 100,
+    };
+    transfer::public_freeze_object(config);
+}
+```
+
+## Object Deletion
+
+Objects without `drop` must be explicitly deleted:
+
+```move
+public fun burn_nft(nft: NFT) {
+    let NFT { id, name: _, description: _, url: _ } = nft;
+    object::delete(id);
+}
+```
+
+## Dynamic Fields
+
+Attach data to objects dynamically:
+
+```move
+use sui::dynamic_field as df;
+
+public struct Container has key {
+    id: UID,
+}
+
+public fun add_field(
+    container: &mut Container,
+    key: vector<u8>,
+    value: u64,
+) {
+    df::add(&mut container.id, key, value);
+}
+
+public fun get_field(container: &Container, key: vector<u8>): &u64 {
+    df::borrow(&container.id, key)
+}
+
+public fun remove_field(
+    container: &mut Container,
+    key: vector<u8>,
+): u64 {
+    df::remove(&mut container.id, key)
+}
+```
+
+## Object Display
+
+Define how objects appear in wallets and explorers:
+
+```move
+use sui::display;
+use sui::package;
+
+public struct NFT has key, store {
+    id: UID,
+    name: String,
+    image_url: String,
+}
+
+public struct WITNESS has drop {}
+
+fun init(witness: WITNESS, ctx: &mut TxContext) {
+    let keys = vector[
+        b"name".to_string(),
+        b"image_url".to_string(),
+        b"description".to_string(),
+    ];
+
+    let values = vector[
+        b"{name}".to_string(),
+        b"{image_url}".to_string(),
+        b"A unique NFT".to_string(),
+    ];
+
+    let publisher = package::claim(witness, ctx);
+    let mut display = display::new_with_fields<NFT>(
+        &publisher, keys, values, ctx
+    );
+    display::update_version(&mut display);
+
+    transfer::public_transfer(publisher, ctx.sender());
+    transfer::public_transfer(display, ctx.sender());
+}
+```
+
+## Best Practices
+
+### 1. Use descriptive struct names
+
+```move
+// Good
+public struct UserProfile has key { /* ... */ }
+public struct GameAsset has key, store { /* ... */ }
+
+// Avoid
+public struct Data has key { /* ... */ }
+public struct Object has key { /* ... */ }
+```
+
+### 2. Choose abilities carefully
+
+```move
+// Soulbound (cannot transfer or store)
+public struct Achievement has key {
+    id: UID,
+    owner: address,
+}
+
+// Tradeable
+public struct TradingCard has key, store {
+    id: UID,
+    rarity: u8,
+}
+```
+
+### 3. Validate related objects
+
+```move
+public fun use_item(hero: &mut Hero, item: Item) {
+    // Ensure item belongs to same game
+    assert!(hero.game_id == item.game_id, EWrongGame);
+    // Use item...
+}
+```
+
+### 4. Clean up resources
+
+```move
+public fun consume_potion(potion: Potion): u64 {
+    let Potion { id, potency, game_id: _ } = potion;
+    object::delete(id);
+    potency
+}
+```
+
+### 5. Document object lifecycle
+
+```move
+/// Creates a new quest.
+/// The quest must be completed with `complete_quest` or
+/// cancelled with `cancel_quest` before it can be deleted.
+public fun create_quest(/* ... */) -> Quest {
+    // ...
+}
+```
+
+## Next Steps
+
+- [Learn about shared objects](/guides/shared-objects)
+- [Understand events](/guides/events)
+- [Implement capability patterns](/guides/capability-pattern)
+- [Explore dynamic fields](https://docs.sui.io/build/dynamic-fields)

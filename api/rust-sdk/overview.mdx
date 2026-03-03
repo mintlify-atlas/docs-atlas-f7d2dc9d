@@ -1,0 +1,320 @@
+---
+title: Rust SDK Overview
+description: Type-safe Rust client for the Sui blockchain
+---
+
+The Sui Rust SDK provides a type-safe, high-level interface for interacting with the Sui blockchain. It builds on top of the JSON-RPC API and offers idiomatic Rust patterns for working with Sui.
+
+## Installation
+
+Add the Sui SDK to your project:
+
+```bash
+cargo add sui-sdk
+```
+
+Or add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+sui-sdk = "1.0"
+```
+
+## Quick Start
+
+```rust
+use sui_sdk::SuiClientBuilder;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    // Connect to Sui network
+    let sui = SuiClientBuilder::default()
+        .build("https://fullnode.mainnet.sui.io:443")
+        .await?;
+    
+    println!("Sui version: {}", sui.api_version());
+    
+    Ok(())
+}
+```
+
+## SuiClientBuilder
+
+The `SuiClientBuilder` provides a fluent interface for configuring and building a `SuiClient`.
+
+### Configuration Options
+
+```rust
+use sui_sdk::SuiClientBuilder;
+use std::time::Duration;
+use std::collections::HashMap;
+
+let sui = SuiClientBuilder::default()
+    .request_timeout(Duration::from_secs(60))
+    .max_concurrent_requests(256)
+    .ws_url("wss://fullnode.mainnet.sui.io:443")
+    .ws_ping_interval(Duration::from_secs(30))
+    .basic_auth("username", "password")
+    .custom_headers({
+        let mut headers = HashMap::new();
+        headers.insert("X-Custom-Header".to_string(), "value".to_string());
+        headers
+    })
+    .build("https://fullnode.mainnet.sui.io:443")
+    .await?;
+```
+
+### Network Shortcuts
+
+```rust
+// Local network (http://127.0.0.1:9000)
+let sui_local = SuiClientBuilder::default()
+    .build_localnet()
+    .await?;
+
+// Devnet (https://fullnode.devnet.sui.io:443)
+let sui_devnet = SuiClientBuilder::default()
+    .build_devnet()
+    .await?;
+
+// Testnet (https://fullnode.testnet.sui.io:443)
+let sui_testnet = SuiClientBuilder::default()
+    .build_testnet()
+    .await?;
+
+// Mainnet (https://fullnode.mainnet.sui.io:443)
+let sui_mainnet = SuiClientBuilder::default()
+    .build_mainnet()
+    .await?;
+```
+
+## SuiClient APIs
+
+The `SuiClient` provides access to different API modules:
+
+### ReadApi
+
+Query objects, transactions, and network state:
+
+```rust
+let read_api = sui.read_api();
+
+// Get object
+let obj = read_api.get_object_with_options(
+    object_id,
+    SuiObjectDataOptions::default().with_content()
+).await?;
+
+// Get transaction
+let tx = read_api.get_transaction_with_options(
+    digest,
+    SuiTransactionBlockResponseOptions::default()
+        .with_input()
+        .with_effects()
+).await?;
+```
+
+### CoinReadApi
+
+Query coin balances and metadata:
+
+```rust
+let coin_api = sui.coin_read_api();
+
+// Get balance
+let balance = coin_api.get_balance(address, None).await?;
+
+// Get all balances
+let all_balances = coin_api.get_all_balances(address).await?;
+
+// Get coin metadata
+let metadata = coin_api.get_coin_metadata("0x2::sui::SUI".to_string()).await?;
+```
+
+### EventApi
+
+Query and subscribe to events:
+
+```rust
+let event_api = sui.event_api();
+
+// Query events
+let events = event_api.query_events(
+    EventFilter::MoveEventType("0x2::coin::CoinCreated".to_string()),
+    None,
+    Some(10),
+    false
+).await?;
+
+// Subscribe to events (WebSocket required)
+let mut event_stream = event_api.subscribe_event(
+    EventFilter::All(vec![])
+).await?;
+```
+
+### GovernanceApi
+
+Query staking and validator information:
+
+```rust
+let gov_api = sui.governance_api();
+
+// Get system state
+let system_state = gov_api.get_latest_sui_system_state().await?;
+
+// Get stakes
+let stakes = gov_api.get_stakes(address).await?;
+
+// Get reference gas price
+let gas_price = gov_api.get_reference_gas_price().await?;
+```
+
+### QuorumDriverApi
+
+Execute transactions:
+
+```rust
+let quorum_api = sui.quorum_driver_api();
+
+// Execute transaction
+let response = quorum_api.execute_transaction_block(
+    signed_transaction,
+    SuiTransactionBlockResponseOptions::default()
+        .with_effects()
+        .with_events(),
+    None
+).await?;
+```
+
+### TransactionBuilder
+
+Build transactions programmatically:
+
+```rust
+let tx_builder = sui.transaction_builder();
+
+// Transfer object
+let tx_data = tx_builder.transfer_object(
+    sender,
+    object_id,
+    Some(gas),
+    gas_budget,
+    recipient
+).await?;
+```
+
+## Common Patterns
+
+### Query Owned Objects
+
+```rust
+use sui_sdk::SuiClientBuilder;
+use sui_types::base_types::SuiAddress;
+use std::str::FromStr;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default().build_mainnet().await?;
+    let address = SuiAddress::from_str("0x...")?;
+    
+    let owned_objects = sui.read_api()
+        .get_owned_objects(address, None, None, None)
+        .await?;
+    
+    println!("Found {} objects", owned_objects.data.len());
+    
+    Ok(())
+}
+```
+
+### Execute a Transaction
+
+```rust
+use sui_sdk::SuiClientBuilder;
+use sui_types::transaction::Transaction;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default().build_mainnet().await?;
+    
+    // Build and sign transaction
+    let tx: Transaction = /* ... */;
+    
+    // Execute
+    let response = sui.quorum_driver_api()
+        .execute_transaction_block(
+            tx,
+            SuiTransactionBlockResponseOptions::default()
+                .with_effects()
+                .with_events(),
+            None
+        )
+        .await?;
+    
+    println!("Transaction digest: {}", response.digest);
+    
+    Ok(())
+}
+```
+
+### Stream Events
+
+```rust
+use sui_sdk::SuiClientBuilder;
+use sui_json_rpc_types::EventFilter;
+use futures::StreamExt;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default()
+        .ws_url("wss://fullnode.mainnet.sui.io:443")
+        .build("https://fullnode.mainnet.sui.io:443")
+        .await?;
+    
+    let mut events = sui.event_api()
+        .subscribe_event(EventFilter::All(vec![]))
+        .await?;
+    
+    while let Some(event) = events.next().await {
+        match event {
+            Ok(e) => println!("Event: {:?}", e),
+            Err(err) => eprintln!("Error: {}", err),
+        }
+    }
+    
+    Ok(())
+}
+```
+
+## Error Handling
+
+The SDK uses the `SuiRpcResult<T>` type, which is an alias for `Result<T, Error>`:
+
+```rust
+use sui_sdk::error::Error;
+
+match sui.read_api().get_object_with_options(object_id, options).await {
+    Ok(object) => println!("Object: {:?}", object),
+    Err(Error::DataError(msg)) => eprintln!("Data error: {}", msg),
+    Err(Error::RpcError(err)) => eprintln!("RPC error: {}", err),
+    Err(err) => eprintln!("Other error: {}", err),
+}
+```
+
+## Type Definitions
+
+The SDK re-exports important types:
+
+```rust
+use sui_sdk::{
+    types::base_types::{ObjectID, SuiAddress, TransactionDigest},
+    rpc_types::{SuiObjectData, SuiTransactionBlockResponse},
+    json::SuiJsonValue,
+};
+```
+
+## Next Steps
+
+- [SuiClient Usage](/api/rust-sdk/client) - Detailed client documentation
+- [TransactionBuilder](/api/rust-sdk/transaction-builder) - Build transactions
+- [Common Types](/api/rust-sdk/types) - Type reference

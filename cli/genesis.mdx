@@ -1,0 +1,469 @@
+---
+title: sui genesis
+description: Bootstrap and initialize a new Sui network
+---
+
+The `sui genesis` command bootstraps and initializes a new Sui network by generating the genesis configuration and validator setup.
+
+## Synopsis
+
+```bash
+sui genesis [OPTIONS]
+```
+
+## Options
+
+<ParamField path="--from-config" type="path">
+  Start genesis with a given config file
+</ParamField>
+
+<ParamField path="--write-config" type="path">
+  Build a genesis config, write it to the specified path, and exit (without creating genesis blob)
+</ParamField>
+
+<ParamField path="--working-dir" type="path">
+  Working directory for genesis files. Defaults to `~/.sui/sui_config/`
+</ParamField>
+
+<ParamField path="-f, --force" type="boolean">
+  Forces overwriting existing configuration
+</ParamField>
+
+<ParamField path="--epoch-duration-ms" type="u64">
+  Epoch duration in milliseconds
+</ParamField>
+
+<ParamField path="--benchmark-ips" type="string[]">
+  List of IP addresses to generate a genesis suitable for benchmarks. Comma-separated
+</ParamField>
+
+<ParamField path="--with-faucet" type="boolean">
+  Creates an extra faucet configuration for sui persisted runs
+</ParamField>
+
+<ParamField path="--committee-size" type="usize">
+  Set number of validators in the network
+</ParamField>
+
+## Description
+
+The genesis command creates the initial state for a new Sui network. It generates:
+
+- Genesis blob containing the initial network state
+- Validator configurations
+- Network configuration
+- Initial objects and system state
+- Optionally, faucet configuration
+
+## Usage Modes
+
+### 1. Default Genesis (Fresh Start)
+
+Create a new genesis in the default directory:
+
+```bash
+sui genesis
+```
+
+This creates:
+- `~/.sui/sui_config/genesis.blob`
+- `~/.sui/sui_config/network.yaml`
+- Validator configurations
+
+### 2. Custom Working Directory
+
+Generate genesis in a specific directory:
+
+```bash
+sui genesis --working-dir /path/to/sui-network
+```
+
+### 3. From Existing Config
+
+Use a pre-configured genesis config file:
+
+```bash
+sui genesis --from-config /path/to/genesis-config.yaml
+```
+
+### 4. Write Config Only
+
+Generate a genesis config template without creating the genesis blob:
+
+```bash
+sui genesis --write-config /path/to/genesis-config.yaml
+```
+
+You can then edit the config and use `--from-config` to create the genesis.
+
+### 5. With Faucet
+
+Create genesis with faucet configuration:
+
+```bash
+sui genesis --with-faucet
+```
+
+This generates:
+- Standard genesis files
+- `sui.keystore` with faucet keypair
+- Faucet configuration for use with `sui start --with-faucet`
+
+### 6. Custom Epoch Duration
+
+Set a specific epoch duration:
+
+```bash
+sui genesis --epoch-duration-ms 86400000  # 24 hours
+```
+
+**Default:** Determined by network configuration
+
+### 7. Benchmark Genesis
+
+Generate a genesis suitable for benchmarking:
+
+```bash
+sui genesis --benchmark-ips 192.168.1.10,192.168.1.11,192.168.1.12,192.168.1.13
+```
+
+Creates a network configuration with validators at the specified IP addresses.
+
+### 8. Custom Committee Size
+
+Set the number of validators:
+
+```bash
+sui genesis --committee-size 7
+```
+
+## Generated Files
+
+After running `sui genesis`, the working directory contains:
+
+```
+~/.sui/sui_config/
+├── genesis.blob           # Genesis state blob
+├── network.yaml          # Network configuration
+├── validator-0/          # Validator 0 configuration
+│   ├── node.yaml        # Node configuration
+│   ├── db/              # Database directory
+│   └── network.key      # Network keypair
+├── validator-1/          # Validator 1 configuration
+│   └── ...
+├── validator-2/          # Validator 2 configuration
+│   └── ...
+└── validator-3/          # Validator 3 configuration (if committee-size >= 4)
+    └── ...
+```
+
+With `--with-faucet`:
+```
+~/.sui/sui_config/
+├── ... (files above)
+├── sui.keystore          # Keystore with faucet key
+└── sui_benchmark_genesis.keystore  # Benchmark keystore
+```
+
+## Genesis Config File Format
+
+When using `--write-config`, a YAML file is generated with this structure:
+
+```yaml
+accounts:
+  - address: "0x..."
+    gas_objects:
+      - object_id: "0x..."
+        gas_value: 100000000000
+
+validators:
+  - name: "validator-0"
+    protocol_public_key: "..."
+    network_public_key: "..."
+    worker_public_key: "..."
+    account_address: "0x..."
+    network_address: "/ip4/127.0.0.1/tcp/8080/http"
+    p2p_address: "/ip4/127.0.0.1/udp/8084"
+    narwhal_primary_address: "/ip4/127.0.0.1/udp/8081"
+    narwhal_worker_address: "/ip4/127.0.0.1/udp/8082"
+    gas_price: 1000
+    commission_rate: 200
+    stake: 10000000000000
+
+parameters:
+  chain_start_timestamp_ms: 0
+  epoch_duration_ms: 86400000
+  
+protocol_config:
+  # Protocol parameters
+  max_transactions_per_checkpoint: 10000
+  # ... other protocol config
+```
+
+## Workflow Examples
+
+### Local Development Network
+
+```bash
+# Create genesis with faucet
+sui genesis --with-faucet --epoch-duration-ms 60000
+
+# Start the network
+sui start
+```
+
+### Production-Like Network
+
+```bash
+# Generate config template
+sui genesis \
+  --write-config ./genesis-config.yaml \
+  --committee-size 7 \
+  --epoch-duration-ms 86400000
+
+# Edit genesis-config.yaml to:
+# - Set production IP addresses
+# - Configure proper stake amounts
+# - Set gas prices
+
+# Create genesis from config
+sui genesis \
+  --from-config ./genesis-config.yaml \
+  --working-dir /opt/sui-network
+
+# Start validators on their respective machines
+# (See sui start documentation)
+```
+
+### Benchmark Network
+
+```bash
+# Generate genesis for 4 validator nodes
+sui genesis \
+  --benchmark-ips 10.0.1.10,10.0.1.11,10.0.1.12,10.0.1.13 \
+  --working-dir ./benchmark-network \
+  --epoch-duration-ms 60000
+
+# Deploy configurations to respective machines
+# Start validators
+```
+
+### Multi-Validator Local Setup
+
+```bash
+# Create 7-validator network
+sui genesis \
+  --committee-size 7 \
+  --working-dir ./local-7-val \
+  --with-faucet
+
+# Start the network
+sui start --network.config ./local-7-val
+```
+
+## Force Overwrite
+
+The `--force` flag allows overwriting an existing configuration:
+
+```bash
+sui genesis --force
+```
+
+<Warning>
+This will delete all existing genesis data, validator configurations, and network state. Use with caution.
+</Warning>
+
+## Genesis Blob
+
+The `genesis.blob` file contains the serialized initial state of the Sui network, including:
+
+- System packages (framework, stdlib)
+- Initial validator set
+- Genesis objects (coins, system state)
+- Protocol configuration
+- Network parameters
+
+This file must be available to all validators and fullnodes to start the network.
+
+## Validator Configuration
+
+Each validator directory contains:
+
+### node.yaml
+
+Validator node configuration:
+
+```yaml
+protocol-public-key: "..."
+worker-key-path: "./worker.key"
+network-key-path: "./network.key"
+account-key-path: "./account.key"
+network-address: "/ip4/127.0.0.1/tcp/8080/http"
+p2p-address: "/ip4/127.0.0.1/udp/8084"
+narwhal-primary-address: "/ip4/127.0.0.1/udp/8081"
+narwhal-worker-address: "/ip4/127.0.0.1/udp/8082"
+gas-price: 1000
+commission-rate: 200
+```
+
+### Key Files
+
+- `protocol.key` - BLS12-381 protocol keypair
+- `network.key` - Network identity keypair
+- `worker.key` - Narwhal worker keypair
+- `account.key` - Account keypair for rewards
+
+## Network Configuration
+
+The `network.yaml` file contains:
+
+```yaml
+validators:
+  - name: "validator-0"
+    protocol-public-key: "..."
+    network-address: "/ip4/127.0.0.1/tcp/8080/http"
+    # ... validator details
+
+genesis:
+  genesis-file-location: "./genesis.blob"
+```
+
+## Epoch Duration
+
+The epoch duration determines how frequently the network transitions epochs:
+
+- **Development**: 60000ms (1 minute) for rapid testing
+- **Staging**: 3600000ms (1 hour) for realistic testing
+- **Production**: 86400000ms (24 hours) typical mainnet duration
+
+```bash
+# 1-minute epochs for development
+sui genesis --epoch-duration-ms 60000
+
+# 24-hour epochs for production
+sui genesis --epoch-duration-ms 86400000
+```
+
+## Advanced: Custom Protocol Config
+
+For advanced users, protocol configuration can be customized via environment variables when generating genesis:
+
+```bash
+export SUI_PROTOCOL_CONFIG_OVERRIDE_ENABLE=1
+export SUI_PROTOCOL_CONFIG_OVERRIDE_max_transactions_per_checkpoint=20000
+
+sui genesis
+```
+
+<Warning>
+Custom protocol config should only be used in development/test networks. Incompatible settings can cause network failures.
+</Warning>
+
+## Distributed Genesis Ceremony
+
+For production networks with multiple independent validators:
+
+1. **Organizer generates template:**
+   ```bash
+   sui genesis --write-config genesis-template.yaml
+   ```
+
+2. **Each validator generates their keys:**
+   ```bash
+   sui validator make-validator-info \
+     "Validator Name" \
+     "Description" \
+     "https://logo.url" \
+     "https://website" \
+     "validator.hostname" \
+     1000
+   ```
+
+3. **Validators submit their `validator.info` to organizer**
+
+4. **Organizer combines all validator info into config**
+   Edit `genesis-template.yaml` to include all validator information
+
+5. **Organizer generates genesis:**
+   ```bash
+   sui genesis --from-config genesis-template.yaml
+   ```
+
+6. **Distribute `genesis.blob` and configs to validators**
+
+## Troubleshooting
+
+### Directory Not Empty
+
+**Error:** Genesis directory contains existing files
+
+**Solution:**
+```bash
+# Use --force to overwrite
+sui genesis --force
+
+# Or use a different directory
+sui genesis --working-dir ./new-network
+```
+
+### Invalid Validator Configuration
+
+**Error:** Validator info validation failed
+
+**Solution:**
+- Verify all validator addresses are valid multiaddrs
+- Check that protocol keys are properly formatted
+- Ensure stake amounts are sufficient
+
+### Missing Dependencies
+
+**Error:** Cannot load system packages
+
+**Solution:**
+- Ensure Sui binaries are properly installed
+- Check that framework packages are available
+- Rebuild Sui from source if necessary
+
+## See Also
+
+- [sui start](./start) - Start a Sui network from genesis
+- [sui validator make-validator-info](./validator#make-validator-info) - Generate validator info
+- [Genesis ceremony documentation](../guides/genesis-ceremony) - Production genesis process
+
+## Examples
+
+### Quick Local Network
+
+```bash
+# Create and start in one go
+sui genesis --with-faucet && sui start
+```
+
+### Development Network with Custom Parameters
+
+```bash
+sui genesis \
+  --committee-size 4 \
+  --epoch-duration-ms 30000 \
+  --with-faucet \
+  --working-dir ./dev-network
+
+sui start --network.config ./dev-network
+```
+
+### Production Template
+
+```bash
+# Generate template
+sui genesis \
+  --write-config ./production-genesis.yaml \
+  --committee-size 100 \
+  --epoch-duration-ms 86400000
+
+# Edit production-genesis.yaml with real validator info
+
+# Generate final genesis
+sui genesis \
+  --from-config ./production-genesis.yaml \
+  --working-dir /opt/sui-mainnet
+```

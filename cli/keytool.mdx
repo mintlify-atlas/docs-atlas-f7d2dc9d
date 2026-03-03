@@ -1,0 +1,750 @@
+---
+title: sui keytool
+description: Sui keystore tool for managing cryptographic keys, signatures, and MultiSig configurations
+---
+
+The `sui keytool` command provides tools for managing cryptographic keys in the Sui keystore.
+
+## Synopsis
+
+```bash
+sui keytool [OPTIONS] <COMMAND>
+```
+
+## Global Options
+
+<ParamField path="--keystore-path" type="path">
+  Path to the keystore file
+</ParamField>
+
+<ParamField path="--json" type="boolean">
+  Return command outputs in JSON format
+</ParamField>
+
+## Commands
+
+### update-alias
+
+Update an old alias to a new one.
+
+```bash
+sui keytool update-alias <OLD_ALIAS> [NEW_ALIAS]
+```
+
+<ParamField path="OLD_ALIAS" type="string" required>
+  Current alias to update
+</ParamField>
+
+<ParamField path="NEW_ALIAS" type="string">
+  New alias. If not provided, a random one will be generated
+</ParamField>
+
+**Example:**
+```bash
+sui keytool update-alias old_wallet new_wallet
+sui keytool update-alias old_wallet  # Auto-generates new alias
+```
+
+### convert
+
+Convert private key from Hex or Base64 to Bech32 format.
+
+```bash
+sui keytool convert <VALUE>
+```
+
+<ParamField path="VALUE" type="string" required>
+  Private key in Hex or Base64 format
+</ParamField>
+
+**Example:**
+```bash
+sui keytool convert <HEX_OR_BASE64_KEY>
+```
+
+**Output:**
+```json
+{
+  "bech32WithFlag": "suiprivkey1...",
+  "base64WithFlag": "A...",
+  "hexWithoutFlag": "abc123...",
+  "scheme": "ed25519"
+}
+```
+
+<Note>
+Hex private key import/export is deprecated. Use Bech32 format (starting with `suiprivkey`) for all key operations.
+</Note>
+
+### decode-or-verify-tx
+
+Decode transaction bytes or verify a signature.
+
+```bash
+sui keytool decode-or-verify-tx [OPTIONS]
+```
+
+<ParamField path="--tx-bytes" type="string" required>
+  Base64 encoded transaction bytes
+</ParamField>
+
+<ParamField path="--sig" type="GenericSignature">
+  Signature to verify against the transaction
+</ParamField>
+
+<ParamField path="--cur-epoch" type="u64" default="0">
+  Current epoch for verification
+</ParamField>
+
+**Example:**
+```bash
+# Decode only
+sui keytool decode-or-verify-tx --tx-bytes <BASE64_TX>
+
+# Decode and verify
+sui keytool decode-or-verify-tx \
+  --tx-bytes <BASE64_TX> \
+  --sig <BASE64_SIG> \
+  --cur-epoch 100
+```
+
+### decode-multi-sig
+
+Decode a MultiSig signature and optionally verify it.
+
+```bash
+sui keytool decode-multi-sig [OPTIONS]
+```
+
+<ParamField path="--multisig" type="MultiSig" required>
+  MultiSig signature to decode
+</ParamField>
+
+<ParamField path="--tx-bytes" type="string">
+  Transaction bytes to verify against (optional)
+</ParamField>
+
+<ParamField path="--cur-epoch" type="u64" default="0">
+  Current epoch for verification
+</ParamField>
+
+**Example:**
+```bash
+sui keytool decode-multi-sig \
+  --multisig <BASE64_MULTISIG> \
+  --tx-bytes <BASE64_TX> \
+  --cur-epoch 100
+```
+
+### generate
+
+Generate a new keypair.
+
+```bash
+sui keytool generate <KEY_SCHEME> [DERIVATION_PATH] [WORD_LENGTH]
+```
+
+<ParamField path="KEY_SCHEME" type="SignatureScheme" required>
+  Key scheme: `ed25519`, `secp256k1`, or `secp256r1`
+</ParamField>
+
+<ParamField path="DERIVATION_PATH" type="DerivationPath">
+  Optional derivation path. Defaults:
+  - ed25519: `m/44'/784'/0'/0'/0'`
+  - secp256k1: `m/54'/784'/0'/0/0`
+  - secp256r1: `m/74'/784'/0'/0/0`
+</ParamField>
+
+<ParamField path="WORD_LENGTH" type="string">
+  Mnemonic word length: `word12`, `word15`, `word18`, `word21`, or `word24`. Default: `word12`
+</ParamField>
+
+**Example:**
+```bash
+# Generate with defaults
+sui keytool generate ed25519
+
+# Generate with custom word length
+sui keytool generate secp256k1 "m/54'/784'/0'/0/0" word24
+```
+
+**Output:**
+Creates a `.key` file in current directory with filename `<address>.key`.
+
+<Warning>
+Use `sui client new-address` if you want to generate and save the key into sui.keystore instead.
+</Warning>
+
+### import
+
+Add a new key to Sui CLI Keystore.
+
+```bash
+sui keytool import [OPTIONS] <INPUT_STRING> <KEY_SCHEME> [DERIVATION_PATH]
+```
+
+<ParamField path="--alias" type="string">
+  Alias for this address. Must start with a letter and contain only letters, digits, hyphens (-), or underscores (_)
+</ParamField>
+
+<ParamField path="INPUT_STRING" type="string" required>
+  Either a mnemonic phrase or Bech32 encoded private key (starting with `suiprivkey`)
+</ParamField>
+
+<ParamField path="KEY_SCHEME" type="SignatureScheme" required>
+  Key scheme: `ed25519`, `secp256k1`, or `secp256r1`
+</ParamField>
+
+<ParamField path="DERIVATION_PATH" type="DerivationPath">
+  Optional derivation path (only for mnemonic import)
+</ParamField>
+
+**Example:**
+```bash
+# Import from mnemonic
+sui keytool import \
+  --alias my_wallet \
+  "word1 word2 word3 ..." \
+  ed25519
+
+# Import from Bech32 key
+sui keytool import \
+  --alias my_wallet \
+  "suiprivkey1..." \
+  ed25519
+```
+
+### export
+
+Export the private key of a given key identity.
+
+```bash
+sui keytool export --key-identity <KEY_IDENTITY>
+```
+
+<ParamField path="--key-identity" type="KeyIdentity" required>
+  Address or alias of the key to export
+</ParamField>
+
+**Example:**
+```bash
+sui keytool export --key-identity my_wallet
+```
+
+**Output:**
+```json
+{
+  "exportedPrivateKey": "suiprivkey1...",
+  "key": {
+    "alias": "my_wallet",
+    "suiAddress": "0x...",
+    "publicBase64Key": "A...",
+    "keyScheme": "ed25519",
+    "flag": 0
+  }
+}
+```
+
+<Warning>
+Keep exported private keys secure. Anyone with access to the private key has full control of the associated address.
+</Warning>
+
+### list
+
+List all keys in sui.keystore.
+
+```bash
+sui keytool list [OPTIONS]
+```
+
+<ParamField path="-s, --sort-by-alias" type="boolean">
+  Sort by alias instead of address
+</ParamField>
+
+**Example:**
+```bash
+sui keytool list
+sui keytool list --sort-by-alias
+```
+
+**Output:**
+```
+╭────────────┬────────────────────┬────────────────────╮
+│ alias       │ Sui Address            │ Scheme          │
+├────────────┼────────────────────┼────────────────────┤
+│ my_wallet   │ 0x1a2b3c...             │ ed25519         │
+│ work_wallet │ 0x4d5e6f...             │ secp256k1       │
+╰────────────┴────────────────────┴────────────────────╯
+```
+
+### load-keypair
+
+Read a keypair from a file.
+
+```bash
+sui keytool load-keypair <FILE>
+```
+
+<ParamField path="FILE" type="path" required>
+  Path to keypair file
+</ParamField>
+
+Accepted formats:
+- SuiKeyPair: Base64 encoded 33-byte `flag || privkey`
+- AuthorityKeyPair: Base64 encoded `privkey`
+
+**Example:**
+```bash
+sui keytool load-keypair ./account.key
+```
+
+### show
+
+Show the public key and scheme from a keypair file.
+
+```bash
+sui keytool show <FILE>
+```
+
+<ParamField path="FILE" type="path" required>
+  Path to keypair file
+</ParamField>
+
+**Example:**
+```bash
+sui keytool show ./account.key
+```
+
+### sign
+
+Create a signature using a private key.
+
+```bash
+sui keytool sign [OPTIONS]
+```
+
+<ParamField path="--address" type="KeyIdentity" required>
+  Address or alias of the signer
+</ParamField>
+
+<ParamField path="--data" type="string" required>
+  Base64 encoded BCS serialized transaction data
+</ParamField>
+
+<ParamField path="--intent" type="Intent">
+  Intent for the signature. Default: transaction intent
+</ParamField>
+
+**Example:**
+```bash
+sui keytool sign \
+  --address my_wallet \
+  --data <BASE64_TX_DATA>
+```
+
+**Output:**
+```json
+{
+  "suiAddress": "0x...",
+  "rawTxData": "...",
+  "intent": {...},
+  "rawIntentMsg": "...",
+  "digest": "...",
+  "suiSignature": "..."
+}
+```
+
+### sign-kms
+
+Create a signature using AWS KMS.
+
+```bash
+sui keytool sign-kms [OPTIONS]
+```
+
+<ParamField path="--data" type="string" required>
+  Base64 encoded BCS serialized transaction data
+</ParamField>
+
+<ParamField path="--keyid" type="string" required>
+  AWS KMS key ID
+</ParamField>
+
+<ParamField path="--intent" type="Intent">
+  Intent for the signature
+</ParamField>
+
+<ParamField path="--base64pk" type="string" required>
+  Base64 encoded public key
+</ParamField>
+
+**Example:**
+```bash
+sui keytool sign-kms \
+  --data <BASE64_TX_DATA> \
+  --keyid arn:aws:kms:region:account:key/id \
+  --base64pk <BASE64_PUBKEY>
+```
+
+<Note>
+Requires AWS credentials configured in the environment.
+</Note>
+
+### multisig-address
+
+Generate a MultiSig address.
+
+```bash
+sui keytool multisig-address [OPTIONS]
+```
+
+<ParamField path="--threshold" type="ThresholdUnit" required>
+  Threshold for the MultiSig (minimum weight required)
+</ParamField>
+
+<ParamField path="--pks" type="PublicKey[]" required>
+  List of public keys (Base64 encoded `flag || pk`)
+</ParamField>
+
+<ParamField path="--weights" type="WeightUnit[]" required>
+  List of weights corresponding to each public key
+</ParamField>
+
+**Example:**
+```bash
+sui keytool multisig-address \
+  --threshold 2 \
+  --pks <PK1> <PK2> <PK3> \
+  --weights 1 1 1
+```
+
+**Output:**
+```json
+{
+  "multisigAddress": "0x...",
+  "multisig": [
+    {
+      "address": "0x...",
+      "publicBase64Key": "A...",
+      "weight": 1
+    },
+    ...
+  ]
+}
+```
+
+### multisig-combine-partial-sig
+
+Combine partial signatures into a MultiSig signature.
+
+```bash
+sui keytool multisig-combine-partial-sig [OPTIONS]
+```
+
+<ParamField path="--sigs" type="GenericSignature[]" required>
+  List of participating signatures (Base64 encoded)
+</ParamField>
+
+<ParamField path="--pks" type="PublicKey[]" required>
+  List of all public keys in the MultiSig
+</ParamField>
+
+<ParamField path="--weights" type="WeightUnit[]" required>
+  List of weights for each public key
+</ParamField>
+
+<ParamField path="--threshold" type="ThresholdUnit" required>
+  Threshold for the MultiSig
+</ParamField>
+
+**Example:**
+```bash
+sui keytool multisig-combine-partial-sig \
+  --sigs <SIG1> <SIG2> \
+  --pks <PK1> <PK2> <PK3> \
+  --weights 1 1 1 \
+  --threshold 2
+```
+
+<Warning>
+The order of signatures must match the order of public keys. Sum of weights of all signatures must be >= threshold.
+</Warning>
+
+### unpack
+
+Unpack a keypair and output to file.
+
+```bash
+sui keytool unpack <KEYPAIR>
+```
+
+<ParamField path="KEYPAIR" type="string" required>
+  Base64 encoded 33-byte `flag || privkey`
+</ParamField>
+
+Creates a file named `<address>.key` in the current directory.
+
+**Example:**
+```bash
+sui keytool unpack <BASE64_KEYPAIR>
+```
+
+### zk-login-sign-and-execute-tx
+
+Generate OAuth URL and execute a zkLogin transaction.
+
+```bash
+sui keytool zk-login-sign-and-execute-tx [OPTIONS]
+```
+
+<ParamField path="--max-epoch" type="u64" required>
+  Maximum epoch for zkLogin signature validity
+</ParamField>
+
+<ParamField path="--network" type="string" default="devnet">
+  Network to use (devnet, testnet, mainnet)
+</ParamField>
+
+<ParamField path="--fixed" type="boolean" default="false">
+  Use a fixed keypair generated from [0; 32] seed
+</ParamField>
+
+<ParamField path="--test-multisig" type="boolean" default="false">
+  Use a multisig address with zklogin and a traditional keypair
+</ParamField>
+
+<ParamField path="--sign-with-sk" type="boolean" default="false">
+  Execute tx with the traditional sig (in the multisig), otherwise with the zklogin sig
+</ParamField>
+
+**Example:**
+```bash
+sui keytool zk-login-sign-and-execute-tx \
+  --max-epoch 500 \
+  --network devnet
+```
+
+The command will:
+1. Generate OAuth URLs for various providers (Google, Twitch, Facebook, etc.)
+2. Prompt you to visit a URL and paste the redirect
+3. Generate zkLogin proof
+4. Execute a test transaction
+
+### zk-login-enter-token
+
+Workaround for zkLogin when token pasting doesn't work.
+
+```bash
+sui keytool zk-login-enter-token [OPTIONS]
+```
+
+<ParamField path="--parsed-token" type="string" required>
+  Parsed JWT token
+</ParamField>
+
+<ParamField path="--max-epoch" type="u64" required>
+  Maximum epoch
+</ParamField>
+
+<ParamField path="--jwt-randomness" type="string" required>
+  JWT randomness
+</ParamField>
+
+<ParamField path="--kp-bigint" type="string" required>
+  Ephemeral keypair as BigInt
+</ParamField>
+
+<ParamField path="--ephemeral-key-identifier" type="SuiAddress" required>
+  Ephemeral key identifier
+</ParamField>
+
+<ParamField path="--network" type="string" default="devnet">
+  Network to use
+</ParamField>
+
+### zk-login-sig-verify
+
+Parse and verify a zkLogin signature.
+
+```bash
+sui keytool zk-login-sig-verify [OPTIONS]
+```
+
+<ParamField path="--sig" type="string" required>
+  Base64 encoded zkLogin signature
+</ParamField>
+
+<ParamField path="--bytes" type="string">
+  Base64 encoded TransactionData or PersonalMessage
+</ParamField>
+
+<ParamField path="--intent-scope" type="u8" required>
+  0 for TransactionData, 3 for PersonalMessage
+</ParamField>
+
+<ParamField path="--cur-epoch" type="u64">
+  Current epoch for verification
+</ParamField>
+
+<ParamField path="--network" type="string" default="devnet">
+  Network to verify the signature for
+</ParamField>
+
+**Example:**
+```bash
+sui keytool zk-login-sig-verify \
+  --sig <BASE64_SIG> \
+  --bytes <BASE64_BYTES> \
+  --intent-scope 0 \
+  --cur-epoch 100 \
+  --network devnet
+```
+
+### zk-login-insecure-sign-personal-message
+
+**TESTING ONLY**: Generate a zkLogin signature for a personal message.
+
+```bash
+sui keytool zk-login-insecure-sign-personal-message [OPTIONS]
+```
+
+<ParamField path="--data" type="string" required>
+  Base64 encoded message to sign
+</ParamField>
+
+<ParamField path="--max-epoch" type="u64" required>
+  Maximum epoch for zkLogin signature validity
+</ParamField>
+
+**Example:**
+```bash
+sui keytool zk-login-insecure-sign-personal-message \
+  --data $(echo -n "hello" | base64) \
+  --max-epoch 5
+```
+
+<Warning>
+This command uses a test issuer and is for testing only. Do not use in production.
+</Warning>
+
+## Key Schemes
+
+Sui supports three signature schemes:
+
+### ed25519
+- **Default derivation path**: `m/44'/784'/0'/0'/0'`
+- **Recommended for**: General use
+- **Advantages**: Fast, small signatures
+
+### secp256k1
+- **Default derivation path**: `m/54'/784'/0'/0/0`
+- **Recommended for**: Compatibility with Bitcoin/Ethereum tools
+- **Advantages**: Wide ecosystem support
+
+### secp256r1
+- **Default derivation path**: `m/74'/784'/0'/0/0`
+- **Recommended for**: Hardware security modules
+- **Advantages**: NIST standard, hardware support
+
+## MultiSig Workflows
+
+### Creating a 2-of-3 MultiSig
+
+```bash
+# 1. Get public keys from all participants
+sui keytool list
+
+# 2. Create MultiSig address
+sui keytool multisig-address \
+  --threshold 2 \
+  --pks <PK1> <PK2> <PK3> \
+  --weights 1 1 1
+
+# Note the multisig address from output
+```
+
+### Signing with MultiSig
+
+```bash
+# 1. Each participant signs independently
+sui keytool sign \
+  --address participant1 \
+  --data <TX_DATA>
+
+# Repeat for participant2
+
+# 2. Combine signatures
+sui keytool multisig-combine-partial-sig \
+  --sigs <SIG1> <SIG2> \
+  --pks <PK1> <PK2> <PK3> \
+  --weights 1 1 1 \
+  --threshold 2
+
+# 3. Execute transaction with combined signature
+sui client execute-signed-tx \
+  --tx-bytes <TX_BYTES> \
+  --signatures <COMBINED_SIG>
+```
+
+## Security Best Practices
+
+<Warning>
+1. **Never share private keys or mnemonics**: Anyone with access has full control
+2. **Backup mnemonics securely**: Store in a safe, offline location
+3. **Use hardware wallets for large amounts**: Consider Ledger or similar
+4. **Verify addresses carefully**: Double-check before sending transactions
+5. **Use strong aliases**: Make them memorable but not personally identifying
+</Warning>
+
+## Examples
+
+### Complete Key Management Workflow
+
+```bash
+# Generate new key
+sui keytool generate ed25519 "m/44'/784'/0'/0'/0'" word24
+
+# Import to keystore
+sui keytool import \
+  --alias my_secure_wallet \
+  "<MNEMONIC_PHRASE>" \
+  ed25519
+
+# List all keys
+sui keytool list
+
+# Export for backup (store securely!)
+sui keytool export --key-identity my_secure_wallet > backup.key
+
+# Sign a transaction
+sui keytool sign \
+  --address my_secure_wallet \
+  --data <TX_DATA>
+```
+
+### Offline Signing
+
+```bash
+# On online machine: prepare transaction
+sui client call \
+  --package 0x2 \
+  --module coin \
+  --function split \
+  --args 0xCOIN 1000 \
+  --serialize-unsigned-transaction \
+  --gas-budget 5000000
+
+# Copy TX_BYTES to offline machine
+
+# On offline machine: sign
+sui keytool sign \
+  --address cold_wallet \
+  --data <TX_BYTES>
+
+# Copy signature back to online machine
+
+# On online machine: execute
+sui client execute-signed-tx \
+  --tx-bytes <TX_BYTES> \
+  --signatures <SIGNATURE>
+```

@@ -1,0 +1,509 @@
+---
+title: Snapshots and Backups
+description: Guide to creating, managing, and restoring from Sui node snapshots and database backups.
+---
+
+Snapshots provide faster node synchronization and disaster recovery capabilities. This guide covers snapshot management for Sui nodes.
+
+## Snapshot Overview
+
+Snapshots are point-in-time copies of the blockchain database that can be used to:
+
+- **Fast sync**: Bootstrap new nodes quickly
+- **Disaster recovery**: Restore from database corruption
+- **Testing**: Create test environments
+- **Migration**: Move nodes to new hardware
+
+## Official Snapshots
+
+Mysten Labs provides official snapshots for faster node bootstrapping.
+
+### Snapshot Locations
+
+**Mainnet**:
+```
+https://checkpoints.mainnet.sui.io
+```
+
+**Testnet**:
+```
+https://checkpoints.testnet.sui.io
+```
+
+### Using Official Snapshots
+
+Configure in `fullnode.yaml`:
+
+```yaml
+state-archive-read-config:
+  - ingestion-url: https://checkpoints.mainnet.sui.io
+    concurrency: 5
+    remote-store-options:
+      - ["aws_region", "us-west-2"]
+```
+
+This enables the node to download historical checkpoints from the archive.
+
+## Creating Snapshots
+
+### Manual Database Snapshot
+
+<Steps>
+  <Step title="Stop the node">
+    ```bash
+    sudo systemctl stop sui-node
+    ```
+  </Step>
+
+  <Step title="Create snapshot directory">
+    ```bash
+    sudo mkdir -p /opt/sui/snapshots
+    export SNAPSHOT_DATE=$(date +%Y%m%d)
+    ```
+  </Step>
+
+  <Step title="Copy database">
+    ```bash
+    # For validators
+    sudo cp -r /opt/sui/db/authorities_db /opt/sui/snapshots/authorities_db-$SNAPSHOT_DATE
+    sudo cp -r /opt/sui/db/consensus_db /opt/sui/snapshots/consensus_db-$SNAPSHOT_DATE
+
+    # For fullnodes
+    sudo cp -r /opt/sui/db /opt/sui/snapshots/db-$SNAPSHOT_DATE
+    ```
+  </Step>
+
+  <Step title="Compress snapshot (optional)">
+    ```bash
+    cd /opt/sui/snapshots
+    sudo tar -czf authorities_db-$SNAPSHOT_DATE.tar.gz authorities_db-$SNAPSHOT_DATE
+    sudo tar -czf consensus_db-$SNAPSHOT_DATE.tar.gz consensus_db-$SNAPSHOT_DATE
+    
+    # Remove uncompressed copies
+    sudo rm -rf authorities_db-$SNAPSHOT_DATE consensus_db-$SNAPSHOT_DATE
+    ```
+  </Step>
+
+  <Step title="Start the node">
+    ```bash
+    sudo systemctl start sui-node
+    ```
+  </Step>
+</Steps>
+
+### Automated Snapshot Script
+
+```bash
+#!/bin/bash
+# snapshot-sui-db.sh
+
+DB_PATH="/opt/sui/db"
+SNAPSHOT_PATH="/opt/sui/snapshots"
+DATE=$(date +%Y%m%d-%H%M%S)
+RETENTION_DAYS=7
+
+echo "Creating snapshot at $DATE"
+
+# Stop node
+echo "Stopping sui-node..."
+sudo systemctl stop sui-node
+
+# Create snapshot
+echo "Creating snapshot..."
+mkdir -p $SNAPSHOT_PATH
+tar -czf $SNAPSHOT_PATH/sui-db-$DATE.tar.gz -C $DB_PATH .
+
+if [ $? -eq 0 ]; then
+    echo "Snapshot created: $SNAPSHOT_PATH/sui-db-$DATE.tar.gz"
+    
+    # Calculate size
+    SIZE=$(du -h $SNAPSHOT_PATH/sui-db-$DATE.tar.gz | cut -f1)
+    echo "Snapshot size: $SIZE"
+else
+    echo "Snapshot failed!"
+    sudo systemctl start sui-node
+    exit 1
+fi
+
+# Start node
+echo "Starting sui-node..."
+sudo systemctl start sui-node
+
+# Clean old snapshots
+echo "Cleaning snapshots older than $RETENTION_DAYS days..."
+find $SNAPSHOT_PATH -name "sui-db-*.tar.gz" -mtime +$RETENTION_DAYS -delete
+
+echo "Snapshot complete!"
+```
+
+Make executable and schedule:
+
+```bash
+chmod +x snapshot-sui-db.sh
+
+# Add to crontab (run daily at 2 AM)
+0 2 * * * /opt/sui/scripts/snapshot-sui-db.sh >> /var/log/sui-snapshot.log 2>&1
+```
+
+## DB Checkpoint Configuration
+
+Sui nodes support automated database checkpoints at epoch boundaries:
+
+```yaml
+db-checkpoint-config:
+  # Enable checkpoints at epoch end
+  perform-db-checkpoints-at-epoch-end: true
+  
+  # Local checkpoint path
+  checkpoint-path: /opt/sui/db/db_checkpoints
+  
+  # Prune and compact before upload
+  prune-and-compact-before-upload: true
+  
+  # Upload to object storage (optional)
+  object-store-config:
+    object-store: "S3"
+    bucket: "sui-snapshots"
+    aws-region: "us-west-2"
+    aws-access-key-id: "${AWS_ACCESS_KEY_ID}"
+    aws-secret-access-key: "${AWS_SECRET_ACCESS_KEY}"
+```
+
+<Warning>
+  Enabling automatic checkpoints increases storage requirements and may impact performance during epoch boundaries.
+</Warning>
+
+## State Snapshot Configuration
+
+Configure periodic state snapshots:
+
+```yaml
+state-snapshot-write-config:
+  # Object store config
+  object-store-config:
+    object-store: "S3"
+    bucket: "sui-state-snapshots"
+    aws-region: "us-west-2"
+  
+  # Upload concurrency
+  concurrency: 10
+  
+  # Archive snapshots every N epochs (0 = disabled)
+  archive-interval-epochs: 24
+```
+
+## Restoring from Snapshot
+
+### Restore Local Snapshot
+
+<Steps>
+  <Step title="Stop the node">
+    ```bash
+    sudo systemctl stop sui-node
+    ```
+  </Step>
+
+  <Step title="Backup current database (optional)">
+    ```bash
+    sudo mv /opt/sui/db /opt/sui/db.old
+    ```
+  </Step>
+
+  <Step title="Restore snapshot">
+    ```bash
+    # Create db directory
+    sudo mkdir -p /opt/sui/db
+    
+    # Extract snapshot
+    sudo tar -xzf /opt/sui/snapshots/sui-db-YYYYMMDD.tar.gz -C /opt/sui/db
+    
+    # Set permissions
+    sudo chown -R sui:sui /opt/sui/db
+    ```
+  </Step>
+
+  <Step title="Start the node">
+    ```bash
+    sudo systemctl start sui-node
+    ```
+  </Step>
+
+  <Step title="Verify restoration">
+    ```bash
+    # Watch logs
+    journalctl -u sui-node -f
+    
+    # Check sync status
+    curl -s http://localhost:9184/metrics | grep highest_synced_checkpoint
+    ```
+  </Step>
+</Steps>
+
+### Restore from Official Snapshot
+
+To bootstrap a new fullnode from official snapshots:
+
+<Steps>
+  <Step title="Configure archive reading">
+    In `fullnode.yaml`:
+    
+    ```yaml
+    state-archive-read-config:
+      - ingestion-url: https://checkpoints.mainnet.sui.io
+        concurrency: 5
+    ```
+  </Step>
+
+  <Step title="Start node with empty database">
+    ```bash
+    # Ensure db path is empty or doesn't exist
+    sudo rm -rf /opt/sui/db
+    sudo mkdir -p /opt/sui/db
+    sudo chown -R sui:sui /opt/sui/db
+    
+    # Start node
+    sudo systemctl start sui-node
+    ```
+    
+    The node will automatically download and sync from the checkpoint archive.
+  </Step>
+
+  <Step title="Monitor sync progress">
+    ```bash
+    # Watch checkpoint sync
+    journalctl -u sui-node -f | grep checkpoint
+    
+    # Check metrics
+    watch -n 5 'curl -s http://localhost:9184/metrics | grep highest_synced_checkpoint'
+    ```
+  </Step>
+</Steps>
+
+## Backup Strategies
+
+### Cold Backup Strategy
+
+Full node shutdown for backup (safest):
+
+**Frequency**: Weekly
+**Retention**: 4 weekly backups
+**Downtime**: 10-30 minutes
+
+```bash
+#!/bin/bash
+# cold-backup.sh
+
+sudo systemctl stop sui-node
+tar -czf /backups/sui-db-$(date +%Y%m%d).tar.gz /opt/sui/db
+sudo systemctl start sui-node
+```
+
+### Hot Backup Strategy
+
+Background copy without stopping node (faster but less consistent):
+
+**Frequency**: Daily
+**Retention**: 7 daily backups
+**Downtime**: None
+
+```bash
+#!/bin/bash
+# hot-backup.sh
+
+# Use rsync for incremental backups
+rsync -a --delete /opt/sui/db/ /backups/sui-db-latest/
+tar -czf /backups/sui-db-$(date +%Y%m%d).tar.gz /backups/sui-db-latest
+```
+
+<Note>
+  Hot backups may capture an inconsistent state. Only use for non-critical environments or as a supplement to cold backups.
+</Note>
+
+### Incremental Backup Strategy
+
+Use LVM snapshots or filesystem snapshots:
+
+```bash
+# Create LVM snapshot (assuming db is on LVM)
+sudo lvcreate -L 100G -s -n sui-db-snap /dev/vg0/sui-db
+
+# Mount and backup
+sudo mkdir -p /mnt/snapshot
+sudo mount /dev/vg0/sui-db-snap /mnt/snapshot
+tar -czf /backups/sui-db-$(date +%Y%m%d).tar.gz /mnt/snapshot
+
+# Cleanup
+sudo umount /mnt/snapshot
+sudo lvremove -f /dev/vg0/sui-db-snap
+```
+
+## Offsite Backup
+
+### AWS S3 Backup
+
+```bash
+#!/bin/bash
+# backup-to-s3.sh
+
+BUCKET="s3://my-sui-backups"
+SNAPSHOT="/opt/sui/snapshots/sui-db-$(date +%Y%m%d).tar.gz"
+
+# Create snapshot
+./snapshot-sui-db.sh
+
+# Upload to S3
+aws s3 cp $SNAPSHOT $BUCKET/$(basename $SNAPSHOT)
+
+# Set lifecycle policy for old backups
+aws s3api put-bucket-lifecycle-configuration \
+  --bucket my-sui-backups \
+  --lifecycle-configuration file://s3-lifecycle.json
+```
+
+`s3-lifecycle.json`:
+
+```json
+{
+  "Rules": [
+    {
+      "Id": "DeleteOldSnapshots",
+      "Status": "Enabled",
+      "Prefix": "sui-db-",
+      "Expiration": {
+        "Days": 30
+      }
+    },
+    {
+      "Id": "TransitionToGlacier",
+      "Status": "Enabled",
+      "Prefix": "sui-db-",
+      "Transitions": [
+        {
+          "Days": 7,
+          "StorageClass": "GLACIER"
+        }
+      ]
+    }
+  ]
+}
+```
+
+### GCS Backup
+
+```bash
+#!/bin/bash
+# backup-to-gcs.sh
+
+BUCKET="gs://my-sui-backups"
+SNAPSHOT="/opt/sui/snapshots/sui-db-$(date +%Y%m%d).tar.gz"
+
+# Create snapshot
+./snapshot-sui-db.sh
+
+# Upload to GCS
+gsutil -m cp $SNAPSHOT $BUCKET/
+
+# Clean old backups
+gsutil -m rm $BUCKET/sui-db-$(date -d '30 days ago' +%Y%m%d).tar.gz
+```
+
+## Snapshot Verification
+
+Verify snapshot integrity:
+
+```bash
+#!/bin/bash
+# verify-snapshot.sh
+
+SNAPSHOT=$1
+
+if [ ! -f "$SNAPSHOT" ]; then
+    echo "Snapshot not found: $SNAPSHOT"
+    exit 1
+fi
+
+echo "Verifying snapshot: $SNAPSHOT"
+
+# Test archive integrity
+if tar -tzf "$SNAPSHOT" > /dev/null 2>&1; then
+    echo "Archive integrity: OK"
+else
+    echo "Archive integrity: FAILED"
+    exit 1
+fi
+
+# Check size
+SIZE=$(du -h "$SNAPSHOT" | cut -f1)
+echo "Snapshot size: $SIZE"
+
+# List contents
+echo "Archive contains:"
+tar -tzf "$SNAPSHOT" | head -10
+echo "..."
+
+echo "Verification complete"
+```
+
+## Storage Requirements
+
+Plan storage for snapshots:
+
+### Database Sizes (Approximate)
+
+**Mainnet Validator**:
+- authorities_db: 2-3 TB
+- consensus_db: 100-200 GB
+- **Total**: 2.5-3.5 TB
+
+**Testnet Validator**:
+- authorities_db: 500 GB - 1 TB
+- consensus_db: 50-100 GB
+- **Total**: 600 GB - 1.2 TB
+
+### Snapshot Storage
+
+Compressed snapshots are typically 60-70% of original size.
+
+**Example retention strategy**:
+- 7 daily snapshots × 2 TB = 14 TB
+- 4 weekly snapshots × 2 TB = 8 TB
+- 12 monthly snapshots × 2 TB = 24 TB
+- **Total**: ~46 TB
+
+With compression (70%):
+- **Total**: ~32 TB
+
+## Disaster Recovery
+
+### Recovery Time Objective (RTO)
+
+**Full resync from network**: 3-7 days
+**Restore from snapshot**: 2-6 hours
+**Restore from official archive**: 12-24 hours
+
+### Recovery Point Objective (RPO)
+
+Maximum acceptable data loss:
+- **Daily snapshots**: 24 hours
+- **Hourly snapshots**: 1 hour
+- **Real-time replication**: Minutes
+
+### DR Checklist
+
+- [ ] Regular snapshot creation
+- [ ] Offsite backup storage
+- [ ] Tested restore procedures
+- [ ] Documented recovery steps
+- [ ] Backup verification
+- [ ] Monitoring backup success
+- [ ] Encryption for sensitive data
+
+## Best Practices
+
+1. **Regular backups**: Schedule automated daily snapshots
+2. **Test restores**: Verify backup integrity by performing test restores
+3. **Offsite storage**: Store backups in geographically separate location
+4. **Retention policy**: Balance storage costs with recovery requirements
+5. **Monitoring**: Alert on backup failures
+6. **Documentation**: Keep restoration procedures up to date
+7. **Encryption**: Encrypt backups containing sensitive data

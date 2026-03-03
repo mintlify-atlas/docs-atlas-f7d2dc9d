@@ -1,0 +1,148 @@
+---
+title: JSON-RPC Overview
+description: Overview of Sui's JSON-RPC API for interacting with the network
+---
+
+The Sui JSON-RPC API provides a comprehensive interface for interacting with the Sui blockchain. It follows the [JSON-RPC 2.0 specification](https://www.jsonrpc.org/specification) and is available over HTTP and WebSocket connections.
+
+## API Endpoints
+
+**Mainnet:**
+```
+https://fullnode.mainnet.sui.io:443
+```
+
+**Testnet:**
+```
+https://fullnode.testnet.sui.io:443
+```
+
+**Devnet:**
+```
+https://fullnode.devnet.sui.io:443
+```
+
+**Local Network:**
+```
+http://127.0.0.1:9000
+```
+
+## API Categories
+
+The Sui JSON-RPC API is organized into several namespaces:
+
+### Core APIs (`sui` namespace)
+
+- **[ReadApi](/api/read-api)** - Query objects, transactions, checkpoints, and protocol state
+- **[WriteApi](/api/write-api)** - Execute and inspect transactions
+
+### Extended APIs (`suix` namespace)
+
+- **[CoinReadApi](/api/coin-read-api)** - Query coin balances and metadata
+- **[EventApi](/api/event-api)** - Query and subscribe to on-chain events
+- **[GovernanceApi](/api/governance-api)** - Access staking and validator information
+
+### Transaction Builder (`unsafe` namespace)
+
+- **[TransactionBuilder](/api/transaction-builder-api)** - Build unsigned transactions (use SDKs for production)
+
+## Making Requests
+
+### HTTP Example
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "sui_getObject",
+    "params": [
+      "0x5",
+      {
+        "showType": true,
+        "showOwner": true,
+        "showContent": true
+      }
+    ]
+  }'
+```
+
+### WebSocket Subscriptions
+
+WebSocket connections enable real-time event subscriptions:
+
+```javascript
+const ws = new WebSocket('wss://fullnode.mainnet.sui.io:443');
+
+ws.onopen = () => {
+  ws.send(JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'suix_subscribeEvent',
+    params: [{ All: [] }]
+  }));
+};
+
+ws.onmessage = (event) => {
+  console.log('Event:', JSON.parse(event.data));
+};
+```
+
+## Request Format
+
+All JSON-RPC requests must include:
+
+- `jsonrpc`: Version string, always `"2.0"`
+- `id`: Request identifier (number or string)
+- `method`: API method name (e.g., `"sui_getObject"`)
+- `params`: Array of parameters (order matters)
+
+## Response Format
+
+Successful responses:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": { ... }
+}
+```
+
+Error responses:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "error": {
+    "code": -32602,
+    "message": "Invalid params"
+  }
+}
+```
+
+## Rate Limits
+
+Public RPC endpoints have rate limits. For production applications:
+
+- Run your own full node
+- Use a managed RPC provider
+- Implement exponential backoff for retries
+
+## API Discovery
+
+Query available methods using the `rpc.discover` method:
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"rpc.discover","params":[]}'
+```
+
+## Next Steps
+
+- Explore specific APIs in the sidebar
+- Use the [Rust SDK](/api/rust-sdk/overview) for type-safe interactions
+- Try the [GraphQL API](/api/graphql/overview) for flexible queries

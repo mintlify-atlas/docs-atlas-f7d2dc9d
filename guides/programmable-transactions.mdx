@@ -1,0 +1,268 @@
+---
+title: Programmable Transaction Blocks
+description: Chain multiple operations in a single atomic transaction
+---
+
+Programmable Transaction Blocks (PTBs) are Sui's most powerful feature, allowing you to compose multiple commands in one atomic transaction.
+
+## Key Concepts
+
+- **Atomic**: All commands succeed or all fail
+- **Composable**: Chain outputs from one command as inputs to another
+- **Efficient**: One transaction fee for multiple operations
+- **Gas**: Uses gas coin for payments and references
+
+## Basic Example
+
+From `crates/sui-sdk/examples/programmable_transactions_api.rs`:
+
+```rust
+use sui_sdk::types::programmable_transaction_builder::ProgrammableTransactionBuilder;
+use sui_sdk::types::transaction::{Argument, Command};
+
+let mut ptb = ProgrammableTransactionBuilder::new();
+
+// 1. Split coin
+let split_amount = ptb.pure(1000u64)?;
+ptb.command(Command::SplitCoins(
+    Argument::GasCoin,
+    vec![split_amount],
+));
+
+// 2. Transfer split coin
+let recipient = ptb.pure(recipient_address)?;
+ptb.command(Command::TransferObjects(
+    vec![Argument::Result(0)], // Result from step 1
+    recipient,
+));
+
+let pt = ptb.finish();
+```
+
+## TypeScript Example
+
+```typescript
+import { Transaction } from '@mysten/sui/transactions';
+
+const tx = new Transaction();
+
+// Chain multiple operations
+const [coin] = tx.splitCoins(tx.gas, [1_000_000]);
+tx.transferObjects([coin], recipient);
+
+// Execute
+const result = await client.signAndExecuteTransaction({
+  transaction: tx,
+  signer: keypair,
+});
+```
+
+## Advanced Patterns
+
+### Multi-step DeFi transaction
+
+```typescript
+const tx = new Transaction();
+
+// 1. Split payment
+const [payment] = tx.splitCoins(tx.gas, [5_000_000]);
+
+// 2. Swap tokens
+const [outputToken] = tx.moveCall({
+  target: '${dexPackage}::pool::swap',
+  arguments: [
+    tx.object(poolId),
+    payment,
+  ],
+  typeArguments: ['0x2::sui::SUI', '${tokenType}'],
+});
+
+// 3. Stake received tokens
+tx.moveCall({
+  target: '${stakingPackage}::stake::deposit',
+  arguments: [
+    tx.object(stakingPoolId),
+    outputToken,
+  ],
+});
+```
+
+### NFT minting and listing
+
+```typescript
+const tx = new Transaction();
+
+// 1. Mint NFT
+const [nft] = tx.moveCall({
+  target: '${nftPackage}::nft::mint',
+  arguments: [
+    tx.pure.string('NFT Name'),
+    tx.pure.string('Description'),
+    tx.pure.string('https://image.url'),
+  ],
+});
+
+// 2. List on marketplace
+tx.moveCall({
+  target: '${marketplacePackage}::market::list',
+  arguments: [
+    tx.object(marketplaceId),
+    nft,
+    tx.pure.u64(1_000_000_000), // Price: 1 SUI
+  ],
+});
+```
+
+## Flash Loan Pattern
+
+From `examples/move/flash_lender`:
+
+```typescript
+const tx = new Transaction();
+
+// 1. Take flash loan
+const [loan, receipt] = tx.moveCall({
+  target: '${flashLenderPackage}::example::loan',
+  arguments: [
+    tx.object(lenderId),
+    tx.pure.u64(1000000), // Amount
+  ],
+  typeArguments: ['0x2::sui::SUI'],
+});
+
+// 2. Use the loaned funds
+const [profit] = tx.moveCall({
+  target: '${arbitragePackage}::trade::execute',
+  arguments: [loan],
+});
+
+// 3. Merge profit with loan
+tx.mergeCoins(loan, [profit]);
+
+// 4. Repay loan
+tx.moveCall({
+  target: '${flashLenderPackage}::example::repay',
+  arguments: [
+    tx.object(lenderId),
+    loan,
+    receipt,
+  ],
+  typeArguments: ['0x2::sui::SUI'],
+});
+```
+
+## Transaction Commands
+
+### SplitCoins
+
+Split a coin into multiple coins:
+
+```typescript
+const [coin1, coin2, coin3] = tx.splitCoins(tx.gas, [
+  1000000,
+  2000000,
+  3000000,
+]);
+```
+
+### MergeCoins
+
+Merge multiple coins into one:
+
+```typescript
+tx.mergeCoins(targetCoin, [coin1, coin2, coin3]);
+```
+
+### TransferObjects
+
+Transfer objects to an address:
+
+```typescript
+tx.transferObjects([object1, object2], recipient);
+```
+
+### MoveCall
+
+Call a Move function:
+
+```typescript
+tx.moveCall({
+  target: 'package::module::function',
+  arguments: [arg1, arg2],
+  typeArguments: ['Type1', 'Type2'],
+});
+```
+
+### MakeMoveVec
+
+Create a vector of objects:
+
+```typescript
+const vec = tx.makeMoveVec({
+  objects: [obj1, obj2, obj3],
+});
+```
+
+### Publish
+
+Publish a new package:
+
+```typescript
+const [upgradeCap] = tx.publish({
+  modules: compiledModules,
+  dependencies: packageIds,
+});
+```
+
+## Gas Management
+
+### Using gas coin
+
+```typescript
+// Gas coin is automatically available as tx.gas
+const [payment] = tx.splitCoins(tx.gas, [1000000]);
+```
+
+### Setting gas budget
+
+```typescript
+const tx = new Transaction();
+tx.setGasBudget(10_000_000);
+```
+
+## Best Practices
+
+### 1. Minimize transactions
+
+```typescript
+// Good: One transaction
+const tx = new Transaction();
+tx.moveCall({ target: 'package::module::func1', arguments: [arg1] });
+tx.moveCall({ target: 'package::module::func2', arguments: [arg2] });
+
+// Avoid: Multiple transactions
+const tx1 = new Transaction();
+tx1.moveCall({ target: 'package::module::func1', arguments: [arg1] });
+const tx2 = new Transaction();
+tx2.moveCall({ target: 'package::module::func2', arguments: [arg2] });
+```
+
+### 2. Chain results efficiently
+
+```typescript
+// Use results from previous commands
+const [result1] = tx.moveCall({ /* ... */ });
+const [result2] = tx.moveCall({
+  arguments: [result1], // Use previous result
+});
+```
+
+### 3. Handle errors atomically
+
+All commands in a PTB succeed or fail together - design accordingly.
+
+## Next Steps
+
+- [Sign and submit transactions](/guides/sign-submit-transactions)
+- [Explore DeFi example](/guides/examples/defi)
+- [Learn about flash loans](/guides/examples/defi)

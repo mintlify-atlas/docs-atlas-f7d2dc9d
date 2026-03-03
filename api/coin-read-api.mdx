@@ -1,0 +1,272 @@
+---
+title: CoinReadApi
+description: Query coin balances, metadata, and supply information
+---
+
+The CoinReadApi provides methods for querying coin-related data on the Sui network. All methods are in the `suix` namespace.
+
+## Methods
+
+### getCoins
+
+Returns all `Coin<coin_type>` objects owned by an address.
+
+<ParamField path="owner" type="SuiAddress" required>
+  The owner's Sui address
+</ParamField>
+
+<ParamField path="coin_type" type="string">
+  Optional type name for the coin (e.g., `0x168da5bf1f48dafc111b0a488fa454aca95e0b5e::usdc::USDC`). Defaults to `0x2::sui::SUI` if not specified
+</ParamField>
+
+<ParamField path="cursor" type="string">
+  Optional paging cursor
+</ParamField>
+
+<ParamField path="limit" type="usize">
+  Maximum number of items per page
+</ParamField>
+
+<ResponseField name="result" type="CoinPage">
+  Paginated coin results
+  
+  <Expandable title="response fields">
+    <ResponseField name="data" type="Coin[]">Array of coin objects</ResponseField>
+    <ResponseField name="nextCursor" type="string">Cursor for next page</ResponseField>
+    <ResponseField name="hasNextPage" type="boolean">Whether more results exist</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getCoins",
+    "params": [
+      "0x...",
+      "0x2::sui::SUI",
+      null,
+      10
+    ]
+  }'
+```
+
+---
+
+### getAllCoins
+
+Returns all Coin objects owned by an address (all coin types).
+
+<ParamField path="owner" type="SuiAddress" required>
+  The owner's Sui address
+</ParamField>
+
+<ParamField path="cursor" type="string">
+  Optional paging cursor
+</ParamField>
+
+<ParamField path="limit" type="usize">
+  Maximum number of items per page
+</ParamField>
+
+<ResponseField name="result" type="CoinPage">
+  Paginated results with all coins of all types
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getAllCoins",
+    "params": [
+      "0x...",
+      null,
+      50
+    ]
+  }'
+```
+
+---
+
+### getBalance
+
+Returns the total coin balance for one coin type, owned by the address.
+
+<ParamField path="owner" type="SuiAddress" required>
+  The owner's Sui address
+</ParamField>
+
+<ParamField path="coin_type" type="string">
+  Optional type name for the coin (e.g., `0x168da5bf1f48dafc111b0a488fa454aca95e0b5e::usdc::USDC`). Defaults to `0x2::sui::SUI` if not specified
+</ParamField>
+
+<ResponseField name="result" type="Balance">
+  Balance information
+  
+  <Expandable title="response fields">
+    <ResponseField name="coinType" type="string">The coin type</ResponseField>
+    <ResponseField name="coinObjectCount" type="number">Number of coin objects</ResponseField>
+    <ResponseField name="totalBalance" type="string">Total balance across all coin objects</ResponseField>
+    <ResponseField name="lockedBalance" type="object">Locked balance details</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getBalance",
+    "params": [
+      "0x...",
+      "0x2::sui::SUI"
+    ]
+  }'
+```
+
+---
+
+### getAllBalances
+
+Returns the total coin balance for all coin types owned by the address.
+
+<ParamField path="owner" type="SuiAddress" required>
+  The owner's Sui address
+</ParamField>
+
+<ResponseField name="result" type="Balance[]">
+  Array of balance information for each coin type
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getAllBalances",
+    "params": [
+      "0x..."
+    ]
+  }'
+```
+
+---
+
+### getCoinMetadata
+
+Returns metadata (symbol, decimals, etc.) for a coin type.
+
+<Info>
+  If the coin's metadata was wrapped in the transaction that published its marker type, or the latest version is wrapped or deleted, it will not be found.
+</Info>
+
+<ParamField path="coin_type" type="string" required>
+  Type name for the coin (e.g., `0x168da5bf1f48dafc111b0a488fa454aca95e0b5e::usdc::USDC`)
+</ParamField>
+
+<ResponseField name="result" type="SuiCoinMetadata">
+  Coin metadata if found
+  
+  <Expandable title="response fields">
+    <ResponseField name="decimals" type="number">Number of decimal places</ResponseField>
+    <ResponseField name="name" type="string">Coin name</ResponseField>
+    <ResponseField name="symbol" type="string">Coin symbol</ResponseField>
+    <ResponseField name="description" type="string">Coin description</ResponseField>
+    <ResponseField name="iconUrl" type="string">Icon URL if available</ResponseField>
+    <ResponseField name="id" type="ObjectID">Metadata object ID</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getCoinMetadata",
+    "params": [
+      "0x2::sui::SUI"
+    ]
+  }'
+```
+
+---
+
+### getTotalSupply
+
+Returns the total supply for a coin type.
+
+<ParamField path="coin_type" type="string" required>
+  Type name for the coin (e.g., `0x168da5bf1f48dafc111b0a488fa454aca95e0b5e::usdc::USDC`)
+</ParamField>
+
+<ResponseField name="result" type="Supply">
+  Supply information
+  
+  <Expandable title="response fields">
+    <ResponseField name="value" type="string">Total supply value</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getTotalSupply",
+    "params": [
+      "0x2::sui::SUI"
+    ]
+  }'
+```
+
+## Usage Example with Rust SDK
+
+```rust
+use sui_sdk::SuiClientBuilder;
+use sui_types::base_types::SuiAddress;
+use std::str::FromStr;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default()
+        .build("https://fullnode.mainnet.sui.io:443")
+        .await?;
+    
+    let address = SuiAddress::from_str("0x...")?;
+    
+    // Get SUI balance
+    let balance = sui.coin_read_api()
+        .get_balance(address, None)
+        .await?;
+    
+    println!("SUI Balance: {}", balance.total_balance);
+    
+    // Get all balances
+    let all_balances = sui.coin_read_api()
+        .get_all_balances(address)
+        .await?;
+    
+    for balance in all_balances {
+        println!("{}: {}", balance.coin_type, balance.total_balance);
+    }
+    
+    // Get coin metadata
+    let metadata = sui.coin_read_api()
+        .get_coin_metadata("0x2::sui::SUI".to_string())
+        .await?;
+    
+    if let Some(meta) = metadata {
+        println!("Symbol: {}, Decimals: {}", meta.symbol, meta.decimals);
+    }
+    
+    Ok(())
+}
+```

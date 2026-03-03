@@ -1,0 +1,218 @@
+---
+title: Move Abilities
+description: Understand Move's ability system that controls how types can be used and manipulated.
+---
+
+Abilities in Move are constraints on types that control what operations can be performed on them. They're fundamental to Move's resource safety guarantees.
+
+## The Four Abilities
+
+<CardGroup cols={2}>
+  <Card title="copy" icon="copy">
+    Type can be copied by value
+  </Card>
+  <Card title="drop" icon="trash">
+    Type can be safely discarded
+  </Card>
+  <Card title="store" icon="database">
+    Type can be stored inside structs
+  </Card>
+  <Card title="key" icon="key">
+    Type can be a top-level object
+  </Card>
+</CardGroup>
+
+## Copy Ability
+
+Types with `copy` can be duplicated:
+
+```move
+public struct Point has copy, drop {
+    x: u64,
+    y: u64,
+}
+
+let p1 = Point { x: 1, y: 2 };
+let p2 = p1;  // OK: Point has copy
+let p3 = p1;  // Still OK: p1 is still valid
+```
+
+<Warning>
+  Objects with `UID` cannot have `copy` ability because UIDs must be unique.
+</Warning>
+
+## Drop Ability
+
+Types with `drop` can be ignored or discarded:
+
+```move
+public struct Config has drop {
+    timeout: u64,
+}
+
+let config = Config { timeout: 100 };
+// config automatically dropped at end of scope
+
+// Without drop, must explicitly unpack:
+public struct NoDropStruct {
+    value: u64,
+}
+
+let nds = NoDropStruct { value: 10 };
+let NoDropStruct { value: _ } = nds;  // Must unpack
+```
+
+## Store Ability
+
+Types with `store` can be:
+- Stored in other structs
+- Transferred with `public_transfer`
+- Stored in global storage
+
+```move
+public struct Container has key {
+    id: UID,
+    item: Item,  // Item must have store
+}
+
+public struct Item has store {
+    value: u64,
+}
+```
+
+## Key Ability
+
+Types with `key` can be top-level Sui objects:
+
+```move
+public struct MyObject has key {
+    id: UID,  // Required for key
+    data: vector<u8>,
+}
+
+public struct NotAnObject has store {
+    value: u64,  // No key = not an object
+}
+```
+
+<Note>
+  Types with `key` must have `id: UID` as their first field.
+</Note>
+
+## Common Combinations
+
+<Tabs>
+  <Tab title="key + store">
+    ```move
+    // Transferable object
+    public struct NFT has key, store {
+        id: UID,
+        name: String,
+    }
+    
+    transfer::public_transfer(nft, recipient);
+    ```
+  </Tab>
+  
+  <Tab title="key only">
+    ```move
+    // Non-transferable object
+    public struct SoulboundToken has key {
+        id: UID,
+        owner: address,
+    }
+    
+    // Can only use transfer::transfer (module-private)
+    ```
+  </Tab>
+  
+  <Tab title="copy + drop + store">
+    ```move
+    // Simple value type
+    public struct Metadata has copy, drop, store {
+        author: address,
+        timestamp: u64,
+    }
+    ```
+  </Tab>
+  
+  <Tab title="drop only">
+    ```move
+    // Witness pattern
+    public struct WITNESS has drop {}
+    ```
+  </Tab>
+</Tabs>
+
+## Ability Constraints in Generics
+
+```move
+// Require specific abilities
+public struct Box<T: store> has key, store {
+    id: UID,
+    value: T,  // T must have store
+}
+
+public fun transfer_box<T: key + store>(box: Box<T>, recipient: address) {
+    transfer::public_transfer(box, recipient);
+}
+```
+
+## Phantom Type Parameters
+
+```move
+public struct Coin<phantom T> has key, store {
+    id: UID,
+    balance: u64,
+}
+
+// T doesn't need any abilities because it's phantom
+public struct USD {}  // No abilities needed
+let coin: Coin<USD> = /* ... */;
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use minimal abilities">
+    Only grant abilities that are necessary:
+    
+    ```move
+    // If it doesn't need to be copied, don't add copy
+    public struct Asset has key, store {  // Not copy
+        id: UID,
+        value: u64,
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Assets shouldn't have copy">
+    ```move
+    // Bad: Assets should be unique
+    public struct Token has key, store, copy {
+        id: UID,
+        amount: u64,
+    }
+    
+    // Good: Assets are unique
+    public struct Token has key, store {
+        id: UID,
+        amount: u64,
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="Move Overview" href="/concepts/move-overview" icon="book">
+    Learn Move basics
+  </Card>
+  <Card title="Objects" href="/concepts/objects" icon="cube">
+    Understand Sui objects
+  </Card>
+  <Card title="Ownership" href="/concepts/ownership" icon="key">
+    Object ownership rules
+  </Card>
+</CardGroup>

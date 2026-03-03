@@ -1,0 +1,88 @@
+---
+title: zkLogin Authentication
+description: Implement passwordless Web3 authentication with zkLogin
+---
+
+zkLogin enables users to authenticate using familiar OAuth providers (Google, Facebook, etc.) without managing private keys.
+
+## Overview
+
+zkLogin allows users to:
+- Sign in with Google, Facebook, Twitch, or other OAuth providers
+- Create Sui addresses derived from their OAuth identity
+- Sign transactions without managing private keys
+- Maintain security through zero-knowledge proofs
+
+## How It Works
+
+1. User authenticates with OAuth provider (e.g., Google)
+2. OAuth provider returns JWT token
+3. Client generates ephemeral keypair
+4. Zero-knowledge proof is created linking JWT to Sui address
+5. Transactions are signed using ephemeral key + ZK proof
+
+## Integration
+
+### Using @mysten/zklogin
+
+```typescript
+import { generateNonce, generateRandomness } from '@mysten/zklogin';
+
+// 1. Generate randomness and nonce
+const randomness = generateRandomness();
+const nonce = generateNonce(
+  ephemeralPublicKey,
+  maxEpoch,
+  randomness
+);
+
+// 2. Redirect to OAuth provider with nonce
+const oauthUrl = `https://accounts.google.com/o/oauth2/v2/auth?
+  client_id=YOUR_CLIENT_ID&
+  redirect_uri=YOUR_REDIRECT_URI&
+  response_type=id_token&
+  scope=openid&
+  nonce=${nonce}`;
+```
+
+### Enoki Integration
+
+Enoki provides a managed zkLogin solution:
+
+```typescript
+import { EnokiFlow } from '@mysten/enoki';
+
+const enoki = new EnokiFlow({
+  apiKey: 'YOUR_API_KEY',
+});
+
+// Create authentication flow
+const authUrl = enoki.createAuthorizationURL({
+  provider: 'google',
+  redirectUrl: 'https://your-app.com/callback',
+});
+
+// Handle callback
+const session = await enoki.handleCallback(callbackParams);
+const address = session.address;
+```
+
+## Benefits
+
+- **User-friendly**: No seed phrases to manage
+- **Familiar**: Use existing Google/Facebook accounts
+- **Secure**: Zero-knowledge proofs protect privacy
+- **Non-custodial**: Users maintain control
+
+## Use Cases
+
+- Consumer dApps requiring easy onboarding
+- Gaming applications
+- Social platforms
+- NFT marketplaces
+
+## Learn More
+
+- [Enoki documentation](https://docs.enoki.mystenlabs.com)
+- [zkLogin SDK](https://sdk.mystenlabs.com/zklogin)
+- [Sui zkLogin docs](https://docs.sui.io/concepts/cryptography/zklogin)

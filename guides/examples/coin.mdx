@@ -1,0 +1,274 @@
+---
+title: Coin Example
+description: Learn how to create custom coins on Sui
+---
+
+This example shows how to create and manage custom coins using Sui's coin framework.
+
+## Basic Coin Implementation
+
+From `examples/move/coin/sources/my_coin.move`:
+
+```move
+module examples::my_coin {
+    use sui::coin::{Self, TreasuryCap};
+
+    /// The One-Time-Witness for the coin
+    public struct MY_COIN has drop {}
+
+    /// Module initializer - creates currency
+    fun init(witness: MY_COIN, ctx: &mut TxContext) {
+        let (treasury, metadata) = coin::create_currency(
+            witness,
+            6,              // decimals
+            b"MY_COIN",     // symbol
+            b"",            // name
+            b"",            // description
+            option::none(), // icon_url
+            ctx,
+        );
+        
+        // Freeze metadata to make it immutable
+        transfer::public_freeze_object(metadata);
+        
+        // Transfer treasury capability to publisher
+        transfer::public_transfer(treasury, ctx.sender())
+    }
+
+    /// Mint new coins using the TreasuryCap
+    public fun mint(
+        treasury_cap: &mut TreasuryCap<MY_COIN>,
+        amount: u64,
+        recipient: address,
+        ctx: &mut TxContext,
+    ) {
+        let coin = coin::mint(treasury_cap, amount, ctx);
+        transfer::public_transfer(coin, recipient)
+    }
+}
+```
+
+## Key Concepts
+
+### One-Time Witness (OTW)
+
+The `MY_COIN` struct is a one-time witness that proves this is the first (and only) time this module initializes:
+
+```move
+public struct MY_COIN has drop {}
+```
+
+Requirements:
+- Same name as module (in UPPERCASE)
+- Only has `drop` ability
+- Used once in `init`
+
+### TreasuryCap
+
+Controls minting and burning:
+
+```move
+public fun mint(
+    treasury_cap: &mut TreasuryCap<MY_COIN>,
+    amount: u64,
+    recipient: address,
+    ctx: &mut TxContext,
+) {
+    let coin = coin::mint(treasury_cap, amount, ctx);
+    transfer::public_transfer(coin, recipient)
+}
+```
+
+### CoinMetadata
+
+Defines display properties:
+
+- **Decimals**: Number of decimal places
+- **Symbol**: Ticker symbol (e.g., "BTC")
+- **Name**: Full name
+- **Description**: Optional description
+- **Icon URL**: Optional icon image
+
+## Fixed Supply Coin
+
+From `examples/move/coin/sources/fixed_supply.move`:
+
+```move
+module examples::fixed_supply {
+    use sui::coin;
+    use sui::balance::{Self, Supply};
+
+    public struct FIXED_SUPPLY has drop {}
+
+    public struct Treasury has key {
+        id: UID,
+        supply: Supply<FIXED_SUPPLY>,
+        max_supply: u64,
+    }
+
+    const MAX_SUPPLY: u64 = 1_000_000_000; // 1 billion
+    const EMaxSupplyReached: u64 = 0;
+
+    fun init(witness: FIXED_SUPPLY, ctx: &mut TxContext) {
+        let (mut treasury_cap, metadata) = coin::create_currency(
+            witness,
+            6,
+            b"FIXED",
+            b"Fixed Supply Coin",
+            b"A coin with fixed maximum supply",
+            option::none(),
+            ctx,
+        );
+
+        // Mint entire supply
+        let supply = treasury_cap.treasury_into_supply();
+
+        transfer::public_freeze_object(metadata);
+        transfer::share_object(Treasury {
+            id: object::new(ctx),
+            supply,
+            max_supply: MAX_SUPPLY,
+        });
+    }
+
+    public fun mint(
+        treasury: &mut Treasury,
+        amount: u64,
+        ctx: &mut TxContext,
+    ): Coin<FIXED_SUPPLY> {
+        let current_supply = balance::supply_value(&treasury.supply);
+        assert!(
+            current_supply + amount <= treasury.max_supply,
+            EMaxSupplyReached
+        );
+
+        coin::from_balance(
+            balance::increase_supply(&mut treasury.supply, amount),
+            ctx
+        )
+    }
+}
+```
+
+## Regulated Coin
+
+With deny list capability:
+
+```move
+module examples::regcoin {
+    use sui::coin;
+    use sui::deny_list::{DenyList};
+
+    public struct REGCOIN has drop {}
+
+    fun init(witness: REGCOIN, ctx: &mut TxContext) {
+        let (treasury, deny_cap, metadata) = 
+            coin::create_regulated_currency(
+                witness,
+                6,
+                b"REG",
+                b"Regulated Coin",
+                b"A regulated coin with deny list",
+                option::none(),
+                ctx,
+            );
+
+        transfer::public_freeze_object(metadata);
+        transfer::public_transfer(treasury, ctx.sender());
+        transfer::public_transfer(deny_cap, ctx.sender());
+    }
+}
+```
+
+## Deploying Your Coin
+
+<Steps>
+
+### Build the package
+
+```bash
+cd examples/move/coin
+sui move build
+```
+
+### Publish to testnet
+
+```bash
+sui client publish --gas-budget 100000000
+```
+
+Save the:
+- **Package ID**: Your coin package address
+- **TreasuryCap ID**: For minting
+- **CoinMetadata ID**: Display information
+
+### Mint coins
+
+```bash
+sui client call \
+  --package 0xPACKAGE_ID \
+  --module my_coin \
+  --function mint \
+  --args 0xTREASURY_CAP_ID 1000000 0xRECIPIENT \
+  --gas-budget 10000000
+```
+
+</Steps>
+
+## Using Your Coin
+
+### Transfer coins
+
+```bash
+sui client transfer-sui \
+  --to 0xRECIPIENT \
+  --sui-coin-object-id 0xCOIN_ID \
+  --amount 1000 \
+  --gas-budget 1000000
+```
+
+### Check balance
+
+```bash
+sui client balance 0xADDRESS
+```
+
+## Best Practices
+
+### 1. Freeze metadata early
+
+Make coin information immutable:
+
+```move
+transfer::public_freeze_object(metadata);
+```
+
+### 2. Secure treasury capability
+
+Only give minting rights to trusted addresses:
+
+```move
+transfer::public_transfer(treasury, trusted_admin);
+```
+
+### 3. Consider supply limits
+
+Implement max supply checks:
+
+```move
+assert!(total_supply + amount <= MAX_SUPPLY, EMaxSupply);
+```
+
+### 4. Add proper decimals
+
+```move
+6  // Standard for most coins (like USDC)
+9  // For high-precision tokens
+0  // For NFT-like tokens
+```
+
+## Next Steps
+
+- [Explore NFT example](/guides/examples/nft)
+- [Learn about DeFi patterns](/guides/examples/defi)
+- [Review Sui coin standard](https://docs.sui.io/standards/coin)

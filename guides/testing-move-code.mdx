@@ -1,0 +1,463 @@
+---
+title: Testing Move Code
+description: Write comprehensive tests for your Move smart contracts
+---
+
+Testing is essential for building reliable smart contracts. Sui provides powerful testing tools for Move code, including unit tests and scenario-based tests.
+
+## Testing Framework Overview
+
+Sui supports two main testing approaches:
+
+1. **Unit tests**: Test individual functions in isolation
+2. **Scenario tests**: Test multi-transaction flows simulating real usage
+
+## Writing Unit Tests
+
+Unit tests use the `#[test]` attribute and run in a simulated environment.
+
+### Basic Test Structure
+
+```move
+module my_package::example {
+    public struct Counter has key {
+        id: UID,
+        value: u64,
+    }
+
+    public fun increment(counter: &mut Counter) {
+        counter.value = counter.value + 1;
+    }
+
+    #[test]
+    fun test_increment() {
+        let mut ctx = tx_context::dummy();
+        let mut counter = Counter {
+            id: object::new(&mut ctx),
+            value: 0,
+        };
+
+        increment(&mut counter);
+        assert!(counter.value == 1, 0);
+
+        increment(&mut counter);
+        assert!(counter.value == 2, 1);
+
+        let Counter { id, value: _ } = counter;
+        object::delete(id);
+    }
+}
+```
+
+### Test-Only Code
+
+Use `#[test_only]` for code that only exists in tests:
+
+```move
+#[test_only]
+module my_package::example_tests {
+    use my_package::example;
+
+    #[test]
+    fun test_something() {
+        // Test code here
+    }
+}
+```
+
+### Expected Failures
+
+Test that code fails correctly:
+
+```move
+const EInsufficientFunds: u64 = 0;
+
+public fun withdraw(amount: u64, balance: u64): u64 {
+    assert!(balance >= amount, EInsufficientFunds);
+    balance - amount
+}
+
+#[test]
+#[expected_failure(abort_code = EInsufficientFunds)]
+fun test_insufficient_funds() {
+    withdraw(100, 50); // Should abort
+}
+```
+
+## Scenario Testing
+
+Scenario tests simulate multi-transaction flows using `test_scenario`.
+
+### Example from First Package
+
+Based on the actual Sui codebase `first_package` example:
+
+```move
+#[test]
+fun test_sword_transactions() {
+    use sui::test_scenario;
+
+    let initial_owner = @0xCAFE;
+    let final_owner = @0xFACE;
+
+    // First transaction: create sword
+    let mut scenario = test_scenario::begin(initial_owner);
+    {
+        let sword = sword_create(42, 7, scenario.ctx());
+        transfer::public_transfer(sword, initial_owner);
+    };
+
+    // Second transaction: transfer sword
+    scenario.next_tx(initial_owner);
+    {
+        let sword = scenario.take_from_sender<Sword>();
+        transfer::public_transfer(sword, final_owner);
+    };
+
+    // Third transaction: verify final owner has sword
+    scenario.next_tx(final_owner);
+    {
+        let sword = scenario.take_from_sender<Sword>();
+        assert!(sword.magic() == 42 && sword.strength() == 7, 1);
+        scenario.return_to_sender(sword);
+    };
+
+    scenario.end();
+}
+```
+
+### Testing Module Initialization
+
+From the `first_package` example:
+
+```move
+#[test]
+fun test_module_init() {
+    use sui::test_scenario;
+
+    let admin = @0xAD;
+    let initial_owner = @0xCAFE;
+
+    // Emulate module initialization
+    let mut scenario = test_scenario::begin(admin);
+    {
+        init(scenario.ctx());
+    };
+
+    // Check forge was created with correct initial state
+    scenario.next_tx(admin);
+    {
+        let forge = scenario.take_from_sender<Forge>();
+        assert!(forge.swords_created() == 0, 1);
+        scenario.return_to_sender(forge);
+    };
+
+    // Create a sword using the forge
+    scenario.next_tx(admin);
+    {
+        let mut forge = scenario.take_from_sender<Forge>();
+        let sword = forge.new_sword(42, 7, scenario.ctx());
+        transfer::public_transfer(sword, initial_owner);
+        scenario.return_to_sender(forge);
+    };
+
+    scenario.end();
+}
+```
+
+## Testing Shared Objects
+
+Test shared objects using `take_shared` and `return_shared`:
+
+```move
+#[test]
+fun test_shared_object() {
+    use sui::test_scenario as ts;
+    use sui::coin;
+
+    let admin = @0xAD;
+    let user = @0xUSER;
+
+    let mut scenario = ts::begin(admin);
+
+    // Admin creates shared object
+    {
+        let coin = coin::mint_for_testing<SUI>(1000, scenario.ctx());
+        let lender = flash_lender::new(coin.into_balance(), 10, scenario.ctx());
+        transfer::public_share_object(lender);
+    };
+
+    // User interacts with shared object
+    scenario.next_tx(user);
+    {
+        let mut lender = scenario.take_shared<FlashLender<SUI>>();
+        let (loan, receipt) = lender.loan(100, scenario.ctx());
+
+        // Use the loan...
+        lender.repay(loan, receipt);
+
+        ts::return_shared(lender);
+    };
+
+    scenario.end();
+}
+```
+
+## Real-World Example: Flash Loan Tests
+
+From `examples/move/flash_lender`:
+
+```move
+#[test]
+fun test_flash_loan() {
+    let mut ts = ts::begin(@0x0);
+
+    // Admin creates flash lender
+    {
+        ts.next_tx(ADMIN);
+        let coin = coin::mint_for_testing<SUI>(100, ts.ctx());
+        let bal = coin.into_balance();
+        let cap = new(bal, 1, ts.ctx());
+        transfer::public_transfer(cap, ADMIN);
+    };
+
+    // Alice requests and repays a loan
+    {
+        ts.next_tx(ALICE);
+        let mut lender: FlashLender<SUI> = ts.take_shared();
+        let (loan, receipt) = lender.loan(10, ts.ctx());
+
+        // Simulate profit to repay
+        let mut profit = coin::mint_for_testing<SUI>(1, ts.ctx());
+        profit.join(loan);
+
+        lender.repay(profit, receipt);
+        ts::return_shared(lender);
+    };
+
+    // Admin withdraws profit
+    {
+        ts.next_tx(ADMIN);
+        let cap = ts.take_from_sender();
+        let mut lender: FlashLender<SUI> = ts.take_shared();
+
+        assert!(lender.max_loan() == 101, 0);
+
+        let coin = lender.withdraw(&cap, 1, ts.ctx());
+        transfer::public_transfer(coin, ADMIN);
+
+        ts::return_shared(lender);
+        ts.return_to_sender(cap);
+    };
+
+    ts.end();
+}
+```
+
+## Running Tests
+
+### Run all tests
+
+```bash
+sui move test
+```
+
+### Run specific test
+
+```bash
+sui move test test_sword_creation
+```
+
+### Verbose output
+
+```bash
+sui move test --verbose
+```
+
+### With coverage
+
+```bash
+sui move test --coverage
+```
+
+### Filter by module
+
+```bash
+sui move test --filter sword_tests
+```
+
+## Testing Best Practices
+
+### 1. Test Object Lifecycle
+
+Always properly handle objects in tests:
+
+```move
+#[test]
+fun test_object_lifecycle() {
+    let mut ctx = tx_context::dummy();
+
+    // Create
+    let obj = MyObject {
+        id: object::new(&mut ctx),
+        value: 42,
+    };
+
+    // Use
+    assert!(obj.value == 42, 0);
+
+    // Cleanup - objects without 'drop' must be deleted or transferred
+    let MyObject { id, value: _ } = obj;
+    object::delete(id);
+}
+```
+
+### 2. Test Error Conditions
+
+```move
+#[test]
+#[expected_failure(abort_code = ENotAuthorized)]
+fun test_unauthorized_access() {
+    // Code that should fail
+}
+```
+
+### 3. Use Constants for Test Addresses
+
+```move
+#[test_only]
+const ADMIN: address = @0xAD;
+#[test_only]
+const ALICE: address = @0xA;
+#[test_only]
+const BOB: address = @0xB;
+```
+
+### 4. Test State Transitions
+
+Verify state changes across transactions:
+
+```move
+#[test]
+fun test_counter_increments() {
+    let mut scenario = test_scenario::begin(@0x1);
+
+    // Create counter
+    {
+        let counter = Counter { id: object::new(scenario.ctx()), value: 0 };
+        transfer::share_object(counter);
+    };
+
+    // Increment
+    scenario.next_tx(@0x1);
+    {
+        let mut counter = scenario.take_shared<Counter>();
+        assert!(counter.value == 0, 0);
+        increment(&mut counter);
+        assert!(counter.value == 1, 1);
+        test_scenario::return_shared(counter);
+    };
+
+    scenario.end();
+}
+```
+
+### 5. Test Multiple Users
+
+```move
+#[test]
+fun test_multi_user_scenario() {
+    let mut scenario = test_scenario::begin(ADMIN);
+
+    // Admin creates resource
+    scenario.next_tx(ADMIN);
+    { /* ... */ };
+
+    // Alice interacts
+    scenario.next_tx(ALICE);
+    { /* ... */ };
+
+    // Bob interacts
+    scenario.next_tx(BOB);
+    { /* ... */ };
+
+    scenario.end();
+}
+```
+
+## Common Test Patterns
+
+### Testing with Coins
+
+```move
+use sui::coin;
+use sui::sui::SUI;
+
+#[test]
+fun test_payment() {
+    let mut scenario = test_scenario::begin(@0x1);
+
+    let coin = coin::mint_for_testing<SUI>(1000, scenario.ctx());
+    assert!(coin.value() == 1000, 0);
+
+    // Use coin in tests...
+    test_utils::destroy(coin);
+    scenario.end();
+}
+```
+
+### Testing Events
+
+```move
+use sui::event;
+
+public struct GameEvent has copy, drop {
+    winner: address,
+    score: u64,
+}
+
+public fun finish_game(winner: address, score: u64) {
+    event::emit(GameEvent { winner, score });
+}
+
+// Events are emitted but not directly testable in unit tests
+// Use scenario tests and check side effects instead
+```
+
+## Debugging Tests
+
+### Use debug::print
+
+```move
+use std::debug;
+
+#[test]
+fun test_with_debug() {
+    let value = 42;
+    debug::print(&value);
+    // Continue testing...
+}
+```
+
+### Check intermediate state
+
+```move
+#[test]
+fun test_detailed() {
+    let mut counter = 0;
+    assert!(counter == 0, 0);
+
+    counter = counter + 1;
+    assert!(counter == 1, 1);
+
+    counter = counter + 1;
+    assert!(counter == 2, 2);
+}
+```
+
+## Next Steps
+
+- [Learn about Move package structure](/guides/move-packages)
+- [Understand custom objects](/guides/custom-objects)
+- [Explore events in Move](/guides/events)
+- Review [Sui testing docs](https://docs.sui.io/build/test)

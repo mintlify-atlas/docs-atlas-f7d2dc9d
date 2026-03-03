@@ -1,0 +1,262 @@
+---
+title: GovernanceApi
+description: Access staking, validator, and governance information
+---
+
+The GovernanceApi provides methods for querying staking information, validator details, and network governance state. All methods are in the `suix` namespace.
+
+## Methods
+
+### getStakesByIds
+
+Returns one or more `DelegatedStake` objects by their IDs. If a stake was withdrawn, its status will be `Unstaked`.
+
+<ParamField path="staked_sui_ids" type="ObjectID[]" required>
+  Array of StakedSui object IDs
+</ParamField>
+
+<ResponseField name="result" type="DelegatedStake[]">
+  Array of delegated stake information
+  
+  <Expandable title="DelegatedStake fields">
+    <ResponseField name="stakedSuiId" type="ObjectID">The StakedSui object ID</ResponseField>
+    <ResponseField name="stakingPool" type="ObjectID">The staking pool ID</ResponseField>
+    <ResponseField name="validatorAddress" type="SuiAddress">Validator address</ResponseField>
+    <ResponseField name="principal" type="string">Principal staked amount</ResponseField>
+    <ResponseField name="stakeRequestEpoch" type="string">Epoch when stake was requested</ResponseField>
+    <ResponseField name="stakeActiveEpoch" type="string">Epoch when stake became active</ResponseField>
+    <ResponseField name="estimatedReward" type="string">Estimated reward amount</ResponseField>
+    <ResponseField name="status" type="string">Stake status: Active, Pending, or Unstaked</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getStakesByIds",
+    "params": [
+      ["0x..."]
+    ]
+  }'
+```
+
+---
+
+### getStakes
+
+Returns all `DelegatedStake` objects for a given address.
+
+<ParamField path="owner" type="SuiAddress" required>
+  The owner's Sui address
+</ParamField>
+
+<ResponseField name="result" type="DelegatedStake[]">
+  Array of all delegated stakes for the address
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getStakes",
+    "params": [
+      "0x..."
+    ]
+  }'
+```
+
+---
+
+### getCommitteeInfo
+
+Returns the committee information for the specified epoch.
+
+<ParamField path="epoch" type="BigInt<u64>">
+  The epoch of interest. If None, defaults to the latest epoch
+</ParamField>
+
+<ResponseField name="result" type="SuiCommittee">
+  Committee information
+  
+  <Expandable title="response fields">
+    <ResponseField name="epoch" type="string">The epoch number</ResponseField>
+    <ResponseField name="validators" type="ValidatorCommitteeInfo[]">Array of validator committee information</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getCommitteeInfo",
+    "params": [
+      null
+    ]
+  }'
+```
+
+---
+
+### getLatestSuiSystemState
+
+Returns the latest SUI system state object on-chain.
+
+<ResponseField name="result" type="SuiSystemStateSummary">
+  System state summary
+  
+  <Expandable title="response fields">
+    <ResponseField name="epoch" type="string">Current epoch</ResponseField>
+    <ResponseField name="protocolVersion" type="string">Protocol version</ResponseField>
+    <ResponseField name="systemStateVersion" type="string">System state version</ResponseField>
+    <ResponseField name="storageFundTotalObjectStorageRebates" type="string">Storage fund rebates</ResponseField>
+    <ResponseField name="storageFundNonRefundableBalance" type="string">Non-refundable storage balance</ResponseField>
+    <ResponseField name="referenceGasPrice" type="string">Reference gas price</ResponseField>
+    <ResponseField name="safeMode" type="boolean">Whether safe mode is enabled</ResponseField>
+    <ResponseField name="safeModeStorageRewards" type="string">Safe mode storage rewards</ResponseField>
+    <ResponseField name="safeModeComputationRewards" type="string">Safe mode computation rewards</ResponseField>
+    <ResponseField name="safeModeStorageRebates" type="string">Safe mode storage rebates</ResponseField>
+    <ResponseField name="safeModeNonRefundableStorageFee" type="string">Safe mode non-refundable fee</ResponseField>
+    <ResponseField name="epochStartTimestampMs" type="string">Epoch start timestamp</ResponseField>
+    <ResponseField name="epochDurationMs" type="string">Epoch duration</ResponseField>
+    <ResponseField name="stakeSubsidyStartEpoch" type="string">Stake subsidy start epoch</ResponseField>
+    <ResponseField name="maxValidatorCount" type="string">Maximum validator count</ResponseField>
+    <ResponseField name="minValidatorJoiningStake" type="string">Minimum stake to join validators</ResponseField>
+    <ResponseField name="validatorLowStakeThreshold" type="string">Low stake threshold</ResponseField>
+    <ResponseField name="validatorVeryLowStakeThreshold" type="string">Very low stake threshold</ResponseField>
+    <ResponseField name="validatorLowStakeGracePeriod" type="string">Low stake grace period</ResponseField>
+    <ResponseField name="stakeSubsidyBalance" type="string">Stake subsidy balance</ResponseField>
+    <ResponseField name="stakeSubsidyDistributionCounter" type="string">Subsidy distribution counter</ResponseField>
+    <ResponseField name="stakeSubsidyCurrentDistributionAmount" type="string">Current distribution amount</ResponseField>
+    <ResponseField name="stakeSubsidyPeriodLength" type="string">Subsidy period length</ResponseField>
+    <ResponseField name="stakeSubsidyDecreaseRate" type="number">Subsidy decrease rate</ResponseField>
+    <ResponseField name="totalStake" type="string">Total staked SUI</ResponseField>
+    <ResponseField name="activeValidators" type="ValidatorSummary[]">Active validators</ResponseField>
+    <ResponseField name="pendingActiveValidatorsId" type="ObjectID">Pending validators ID</ResponseField>
+    <ResponseField name="pendingActiveValidatorsSize" type="string">Pending validators count</ResponseField>
+    <ResponseField name="pendingRemovals" type="string[]">Validators pending removal</ResponseField>
+    <ResponseField name="stakingPoolMappingsId" type="ObjectID">Staking pool mappings ID</ResponseField>
+    <ResponseField name="stakingPoolMappingsSize" type="string">Staking pool mappings size</ResponseField>
+    <ResponseField name="inactivePoolsId" type="ObjectID">Inactive pools ID</ResponseField>
+    <ResponseField name="inactivePoolsSize" type="string">Inactive pools count</ResponseField>
+    <ResponseField name="validatorCandidatesId" type="ObjectID">Validator candidates ID</ResponseField>
+    <ResponseField name="validatorCandidatesSize" type="string">Validator candidates count</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getLatestSuiSystemState",
+    "params": []
+  }'
+```
+
+---
+
+### getReferenceGasPrice
+
+Returns the reference gas price for the network.
+
+<ResponseField name="result" type="BigInt<u64>">
+  Reference gas price in MIST
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getReferenceGasPrice",
+    "params": []
+  }'
+```
+
+---
+
+### getValidatorsApy
+
+Returns the validator APY (Annual Percentage Yield) information.
+
+<ResponseField name="result" type="ValidatorApys">
+  Validator APY information
+  
+  <Expandable title="response fields">
+    <ResponseField name="apys" type="ValidatorApy[]">Array of validator APY data</ResponseField>
+    <ResponseField name="epoch" type="string">The epoch for this APY data</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl -X POST https://fullnode.mainnet.sui.io:443 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "suix_getValidatorsApy",
+    "params": []
+  }'
+```
+
+## Usage Example with Rust SDK
+
+```rust
+use sui_sdk::SuiClientBuilder;
+use sui_types::base_types::SuiAddress;
+use std::str::FromStr;
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let sui = SuiClientBuilder::default()
+        .build("https://fullnode.mainnet.sui.io:443")
+        .await?;
+    
+    // Get system state
+    let system_state = sui.governance_api()
+        .get_latest_sui_system_state()
+        .await?;
+    
+    println!("Current Epoch: {}", system_state.epoch);
+    println!("Reference Gas Price: {}", system_state.reference_gas_price);
+    println!("Total Stake: {}", system_state.total_stake);
+    println!("Active Validators: {}", system_state.active_validators.len());
+    
+    // Get reference gas price
+    let gas_price = sui.governance_api()
+        .get_reference_gas_price()
+        .await?;
+    
+    println!("Gas Price: {} MIST", gas_price);
+    
+    // Get stakes for an address
+    let address = SuiAddress::from_str("0x...")?;
+    let stakes = sui.governance_api()
+        .get_stakes(address)
+        .await?;
+    
+    for stake in stakes {
+        println!("Stake: {} SUI with validator {}", 
+            stake.principal, 
+            stake.validator_address);
+    }
+    
+    // Get validator APY
+    let apys = sui.governance_api()
+        .get_validators_apy()
+        .await?;
+    
+    println!("Validator APYs for epoch {}", apys.epoch);
+    
+    Ok(())
+}
+```

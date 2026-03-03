@@ -1,0 +1,371 @@
+---
+title: Staking Mechanism
+description: Learn how staking works on Sui, including delegation, rewards, and the proof-of-stake consensus mechanism.
+---
+
+Staking on Sui allows SUI holders to participate in network security and earn rewards by delegating their tokens to validators. Sui uses a Delegated Proof-of-Stake (DPoS) consensus mechanism.
+
+## Staking Overview
+
+<Steps>
+  <Step title="Delegate SUI">
+    Lock SUI tokens by delegating to a validator
+  </Step>
+  <Step title="Earn Rewards">
+    Receive staking rewards each epoch
+  </Step>
+  <Step title="Withdraw">
+    Unstake and withdraw principal plus rewards
+  </Step>
+</Steps>
+
+## Staking Pool
+
+Each validator operates a staking pool:
+
+```move filename="crates/sui-framework/packages/sui-system/sources/staking_pool.move"
+/// A staking pool embedded in each validator struct in the system state object.
+public struct StakingPool has key, store {
+    id: UID,
+    /// The epoch at which this pool became active
+    activation_epoch: Option<u64>,
+    /// The epoch at which this staking pool ceased to be active
+    deactivation_epoch: Option<u64>,
+    /// The total number of SUI tokens in this pool
+    sui_balance: u64,
+    /// The epoch stake rewards will be added here at the end of each epoch
+    rewards_pool: Balance<SUI>,
+    /// Total number of pool tokens issued by the pool
+    pool_token_balance: u64,
+    /// Exchange rate history of previous epochs
+    exchange_rates: Table<u64, PoolTokenExchangeRate>,
+    /// Pending stake amount for this epoch
+    pending_stake: u64,
+    /// Pending stake withdrawn during the current epoch
+    pending_total_sui_withdraw: u64,
+    /// Pending pool token withdrawn during the current epoch
+    pending_pool_token_withdraw: u64,
+    /// Any extra fields
+    extra_fields: Bag,
+}
+```
+
+## Staked SUI Object
+
+When you stake, you receive a StakedSui object:
+
+```move filename="crates/sui-framework/packages/sui-system/sources/staking_pool.move"
+/// A self-custodial object holding the staked SUI tokens.
+public struct StakedSui has key, store {
+    id: UID,
+    /// ID of the staking pool we are staking with
+    pool_id: ID,
+    /// The epoch at which the stake becomes active
+    stake_activation_epoch: u64,
+    /// The staked SUI tokens
+    principal: Balance<SUI>,
+}
+```
+
+<Note>
+  StakedSui objects are NFTs that represent your stake. You retain custody and can transfer or trade them.
+</Note>
+
+## Staking Process
+
+### Adding Stake
+
+```move filename="crates/sui-framework/packages/sui-system/sources/staking_pool.move"
+/// Request to stake to a staking pool. The stake starts counting at the beginning of the next epoch,
+public(package) fun request_add_stake(
+    pool: &mut StakingPool,
+    stake: Balance<SUI>,
+    stake_activation_epoch: u64,
+    ctx: &mut TxContext,
+): StakedSui {
+    let sui_amount = stake.value();
+    assert!(!pool.is_inactive(), EDelegationToInactivePool);
+    assert!(sui_amount > 0, EDelegationOfZeroSui);
+
+    pool.pending_stake = pool.pending_stake + sui_amount;
+    StakedSui {
+        id: object::new(ctx),
+        pool_id: object::id(pool),
+        stake_activation_epoch,
+        principal: stake,
+    }
+}
+```
+
+### Minimum Stake
+
+```move filename="crates/sui-framework/packages/sui-system/sources/staking_pool.move"
+/// StakedSui objects cannot be split to below this amount.
+const MIN_STAKING_THRESHOLD: u64 = 1_000_000_000; // 1 SUI
+```
+
+## Rewards Calculation
+
+### Exchange Rate
+
+Rewards are tracked through an exchange rate mechanism:
+
+```move filename="crates/sui-framework/packages/sui-system/sources/staking_pool.move"
+/// Struct representing the exchange rate of the stake pool token to SUI.
+public struct PoolTokenExchangeRate has copy, drop, store {
+    sui_amount: u64,
+    pool_token_amount: u64,
+}
+```
+
+When you stake:
+1. You deposit SUI
+2. Pool mints pool tokens at current exchange rate
+3. Exchange rate improves as rewards are added
+4. When you withdraw, pool tokens convert back to SUI at new rate
+
+### Example
+
+```
+Epoch 0: Stake 100 SUI
+  - Exchange rate: 1 pool token = 1 SUI
+  - You get: 100 pool tokens
+
+Epoch 5: Rewards added (10 SUI)
+  - Pool has: 110 SUI, 100 pool tokens
+  - Exchange rate: 1 pool token = 1.1 SUI
+  - Your tokens worth: 110 SUI (10 SUI reward)
+```
+
+## Withdrawing Stakes
+
+```move filename="crates/sui-framework/packages/sui-system/sources/staking_pool.move"
+/// Request to withdraw the given stake plus rewards from a staking pool.
+public(package) fun request_withdraw_stake(
+    pool: &mut StakingPool,
+    staked_sui: StakedSui,
+    ctx: &TxContext,
+): Balance<SUI> {
+    // stake is inactive and the pool is not preactive - allow direct withdraw
+    if (staked_sui.stake_activation_epoch > ctx.epoch() && !pool.is_preactive()) {
+        let principal = staked_sui.into_balance();
+        pool.pending_stake = pool.pending_stake - principal.value();
+        return principal
+    };
+
+    let (pool_token_withdraw_amount, mut principal_withdraw) = pool.withdraw_from_principal(
+        staked_sui,
+    );
+    let principal_withdraw_amount = principal_withdraw.value();
+
+    let rewards_withdraw = pool.withdraw_rewards(
+        principal_withdraw_amount,
+        pool_token_withdraw_amount,
+        ctx.epoch(),
+    );
+    let total_sui_withdraw_amount = principal_withdraw_amount + rewards_withdraw.value();
+
+    pool.pending_total_sui_withdraw = pool.pending_total_sui_withdraw + total_sui_withdraw_amount;
+    pool.pending_pool_token_withdraw =
+        pool.pending_pool_token_withdraw + pool_token_withdraw_amount;
+
+    principal_withdraw.join(rewards_withdraw);
+    principal_withdraw
+}
+```
+
+## Fungible Staked SUI
+
+After the warmup period, StakedSui can be converted to fungible form:
+
+```move filename="crates/sui-framework/packages/sui-system/sources/staking_pool.move"
+/// An alternative to `StakedSui` that holds the pool token amount instead of the SUI balance.
+/// StakedSui objects can be converted to FungibleStakedSuis after the initial warmup period.
+/// The advantage of this is that you can now merge multiple StakedSui objects from different
+/// activation epochs into a single FungibleStakedSui object.
+public struct FungibleStakedSui has key, store {
+    id: UID,
+    /// ID of the staking pool we are staking with
+    pool_id: ID,
+    /// The pool token amount
+    value: u64,
+}
+```
+
+This enables:
+- Merging stakes from different epochs
+- More flexible trading
+- Simplified management
+
+## Validator Selection
+
+Choose validators based on:
+
+<CardGroup cols={2}>
+  <Card title="Performance" icon="gauge-high">
+    Uptime and transaction processing speed
+  </Card>
+  <Card title="Commission" icon="percent">
+    Lower commission = more rewards for delegators
+  </Card>
+  <Card title="Stake Amount" icon="coins">
+    Consider stake distribution for decentralization
+  </Card>
+  <Card title="Reputation" icon="star">
+    Track record and community standing
+  </Card>
+</CardGroup>
+
+## Epoch Boundaries
+
+Staking operations take effect at epoch boundaries:
+
+```
+Epoch N:
+  - You request stake
+  - Stake is pending
+
+Epoch N+1:
+  - Stake becomes active
+  - Starts earning rewards
+  
+Epoch N+2:
+  - Full rewards earned
+```
+
+## Using the SDK
+
+### Stake SUI
+
+```typescript
+import { Transaction } from '@mysten/sui/transactions';
+
+const tx = new Transaction();
+
+// Split coin for staking
+const [stakeCoin] = tx.splitCoins(tx.gas, [1_000_000_000]); // 1 SUI
+
+// Request add stake
+tx.moveCall({
+    target: '0x3::sui_system::request_add_stake',
+    arguments: [
+        tx.object('0x5'), // SuiSystemState
+        stakeCoin,
+        tx.pure.address(validatorAddress),
+    ],
+});
+
+const result = await client.signAndExecuteTransaction({
+    transaction: tx,
+    signer: keypair,
+});
+```
+
+### Withdraw Stake
+
+```typescript
+const tx = new Transaction();
+
+tx.moveCall({
+    target: '0x3::sui_system::request_withdraw_stake',
+    arguments: [
+        tx.object('0x5'), // SuiSystemState
+        tx.object(stakedSuiId),
+    ],
+});
+```
+
+### Check Rewards
+
+```typescript
+const stakes = await client.getStakes({
+    owner: address,
+});
+
+stakes.forEach(stake => {
+    const principal = BigInt(stake.principal);
+    const estimatedReward = BigInt(stake.estimatedReward || 0);
+    const total = principal + estimatedReward;
+    
+    console.log(`Stake: ${principal / 1_000_000_000n} SUI`);
+    console.log(`Rewards: ${estimatedReward / 1_000_000_000n} SUI`);
+    console.log(`Total: ${total / 1_000_000_000n} SUI`);
+});
+```
+
+## Risks and Considerations
+
+<Warning>
+  **Important considerations for stakers:**
+  
+  - Staked SUI is locked until withdrawal
+  - Withdrawals process at epoch boundaries
+  - Validator performance affects rewards
+  - Validator can be slashed for misbehavior (though rare)
+  - Early withdrawal from inactive pools may have different terms
+</Warning>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Diversify across validators">
+    ```typescript
+    // Stake with multiple validators
+    const validators = [
+        'validator1_address',
+        'validator2_address',
+        'validator3_address',
+    ];
+    
+    const amountPerValidator = totalAmount / BigInt(validators.length);
+    
+    validators.forEach(validator => {
+        const [coin] = tx.splitCoins(tx.gas, [amountPerValidator]);
+        tx.moveCall({
+            target: '0x3::sui_system::request_add_stake',
+            arguments: [tx.object('0x5'), coin, tx.pure.address(validator)],
+        });
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Monitor validator performance">
+    Regularly check:
+    - Uptime percentage
+    - Commission rate changes
+    - Total stake (avoid over-concentrated validators)
+  </Accordion>
+  
+  <Accordion title="Compound rewards">
+    ```typescript
+    // Withdraw and immediately restake to compound
+    const tx = new Transaction();
+    
+    // Withdraw
+    const [withdrawnCoin] = tx.moveCall({
+        target: '0x3::sui_system::request_withdraw_stake',
+        arguments: [tx.object('0x5'), tx.object(stakedSuiId)],
+    });
+    
+    // Restake
+    tx.moveCall({
+        target: '0x3::sui_system::request_add_stake',
+        arguments: [tx.object('0x5'), withdrawnCoin, tx.pure.address(validatorAddress)],
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="SUI Token" href="/concepts/sui-token" icon="coins">
+    Learn about SUI
+  </Card>
+  <Card title="Validators" href="/concepts/validators" icon="server">
+    Understand validators
+  </Card>
+  <Card title="Epochs" href="/concepts/epochs-checkpoints" icon="clock">
+    Learn about epochs
+  </Card>
+</CardGroup>

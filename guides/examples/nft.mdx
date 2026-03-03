@@ -1,0 +1,280 @@
+---
+title: NFT Example
+description: Create and manage NFTs on Sui
+---
+
+This example demonstrates how to create, transfer, and manage NFTs on Sui.
+
+## Basic NFT Implementation
+
+From `examples/move/nft/sources/testnet_nft.move`:
+
+```move
+module examples::testnet_nft {
+    use std::string;
+    use sui::event;
+    use sui::url::{Self, Url};
+
+    /// An example NFT that can be minted by anybody
+    public struct TestnetNFT has key, store {
+        id: UID,
+        name: string::String,
+        description: string::String,
+        url: Url,
+    }
+
+    /// Event emitted when NFT is minted
+    public struct NFTMinted has copy, drop {
+        object_id: ID,
+        creator: address,
+        name: string::String,
+    }
+
+    /// Get the NFT's name
+    public fun name(nft: &TestnetNFT): &string::String {
+        &nft.name
+    }
+
+    /// Get the NFT's description
+    public fun description(nft: &TestnetNFT): &string::String {
+        &nft.description
+    }
+
+    /// Get the NFT's URL
+    public fun url(nft: &TestnetNFT): &Url {
+        &nft.url
+    }
+
+    /// Mint an NFT and transfer to sender
+    public fun mint_to_sender(
+        name: vector<u8>,
+        description: vector<u8>,
+        url: vector<u8>,
+        ctx: &mut TxContext,
+    ) {
+        let sender = ctx.sender();
+        let nft = TestnetNFT {
+            id: object::new(ctx),
+            name: string::utf8(name),
+            description: string::utf8(description),
+            url: url::new_unsafe_from_bytes(url),
+        };
+
+        event::emit(NFTMinted {
+            object_id: object::id(&nft),
+            creator: sender,
+            name: nft.name,
+        });
+
+        transfer::public_transfer(nft, sender);
+    }
+
+    /// Transfer NFT to recipient
+    public fun transfer(
+        nft: TestnetNFT,
+        recipient: address,
+        _: &mut TxContext
+    ) {
+        transfer::public_transfer(nft, recipient)
+    }
+
+    /// Update NFT description
+    public fun update_description(
+        nft: &mut TestnetNFT,
+        new_description: vector<u8>,
+        _: &mut TxContext,
+    ) {
+        nft.description = string::utf8(new_description)
+    }
+
+    /// Burn an NFT
+    public fun burn(nft: TestnetNFT, _: &mut TxContext) {
+        let TestnetNFT { id, name: _, description: _, url: _ } = nft;
+        id.delete()
+    }
+}
+```
+
+## Key Features
+
+### Object Structure
+
+```move
+public struct TestnetNFT has key, store {
+    id: UID,              // Unique identifier
+    name: String,         // NFT name
+    description: String,  // Description
+    url: Url,            // Image/media URL
+}
+```
+
+- **`key`**: Makes it a Sui object
+- **`store`**: Allows storage in other objects and transfers
+
+### Minting with Events
+
+```move
+public fun mint_to_sender(
+    name: vector<u8>,
+    description: vector<u8>,
+    url: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    let sender = ctx.sender();
+    let nft = TestnetNFT {
+        id: object::new(ctx),
+        name: string::utf8(name),
+        description: string::utf8(description),
+        url: url::new_unsafe_from_bytes(url),
+    };
+
+    // Emit event for indexers
+    event::emit(NFTMinted {
+        object_id: object::id(&nft),
+        creator: sender,
+        name: nft.name,
+    });
+
+    transfer::public_transfer(nft, sender);
+}
+```
+
+## Deploying and Using
+
+<Steps>
+
+### Publish the NFT package
+
+```bash
+cd examples/move/nft
+sui client publish --gas-budget 100000000
+```
+
+### Mint an NFT
+
+```bash
+sui client call \
+  --package 0xPACKAGE_ID \
+  --module testnet_nft \
+  --function mint_to_sender \
+  --args \
+    "My First NFT" \
+    "An amazing NFT on Sui" \
+    "https://example.com/nft.png" \
+  --gas-budget 10000000
+```
+
+### Transfer NFT
+
+```bash
+sui client call \
+  --package 0xPACKAGE_ID \
+  --module testnet_nft \
+  --function transfer \
+  --args 0xNFT_ID 0xRECIPIENT \
+  --gas-budget 10000000
+```
+
+### Update description
+
+```bash
+sui client call \
+  --package 0xPACKAGE_ID \
+  --module testnet_nft \
+  --function update_description \
+  --args 0xNFT_ID "Updated description" \
+  --gas-budget 10000000
+```
+
+### Burn NFT
+
+```bash
+sui client call \
+  --package 0xPACKAGE_ID \
+  --module testnet_nft \
+  --function burn \
+  --args 0xNFT_ID \
+  --gas-budget 10000000
+```
+
+</Steps>
+
+## Advanced: Collection with Display
+
+```move
+use sui::display;
+use sui::package;
+
+public struct TESTNET_NFT has drop {}
+
+fun init(otw: TESTNET_NFT, ctx: &mut TxContext) {
+    let keys = vector[
+        b"name".to_string(),
+        b"description".to_string(),
+        b"image_url".to_string(),
+        b"project_url".to_string(),
+    ];
+
+    let values = vector[
+        b"{name}".to_string(),
+        b"{description}".to_string(),
+        b"{url}".to_string(),
+        b"https://your-project.com".to_string(),
+    ];
+
+    let publisher = package::claim(otw, ctx);
+    let mut display = display::new_with_fields<TestnetNFT>(
+        &publisher,
+        keys,
+        values,
+        ctx
+    );
+    display::update_version(&mut display);
+
+    transfer::public_transfer(publisher, ctx.sender());
+    transfer::public_transfer(display, ctx.sender());
+}
+```
+
+## Best Practices
+
+### 1. Use accessor functions
+
+```move
+public fun name(nft: &TestnetNFT): &String {
+    &nft.name
+}
+```
+
+### 2. Emit events
+
+```move
+event::emit(NFTMinted {
+    object_id: object::id(&nft),
+    creator: sender,
+    name: nft.name,
+});
+```
+
+### 3. Implement Display standard
+
+Make NFTs display correctly in wallets.
+
+### 4. Consider mutability
+
+Decide which fields should be mutable:
+
+```move
+// Mutable description
+public fun update_description(nft: &mut TestnetNFT, new: vector<u8>) {
+    nft.description = string::utf8(new);
+}
+
+// Immutable name (no update function)
+```
+
+## Next Steps
+
+- [Explore gaming example](/guides/examples/gaming)
+- [Learn about DeFi](/guides/examples/defi)
+- [Sui object display](https://docs.sui.io/standards/display)

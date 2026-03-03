@@ -1,0 +1,536 @@
+---
+title: SuiClient Usage
+description: Detailed guide to using the SuiClient
+---
+
+The `SuiClient` is the main entry point for interacting with the Sui blockchain using the Rust SDK.
+
+## Client Information
+
+### API Version
+
+Get the API version of the connected node:
+
+```rust
+let version = sui.api_version();
+println!("API Version: {}", version);
+```
+
+### Check Version Compatibility
+
+Verify that the client and server versions match:
+
+```rust
+if let Err(e) = sui.check_api_version() {
+    eprintln!("Version mismatch: {}", e);
+}
+```
+
+### Available Methods
+
+Query supported RPC methods and subscriptions:
+
+```rust
+let rpc_methods = sui.available_rpc_methods();
+println!("RPC Methods: {:?}", rpc_methods);
+
+let subscriptions = sui.available_subscriptions();
+println!("Subscriptions: {:?}", subscriptions);
+```
+
+## ReadApi Methods
+
+The ReadApi provides extensive querying capabilities.
+
+### Get Objects
+
+```rust
+use sui_json_rpc_types::SuiObjectDataOptions;
+use sui_types::base_types::ObjectID;
+
+// Get single object
+let object = sui.read_api()
+    .get_object_with_options(
+        object_id,
+        SuiObjectDataOptions {
+            show_type: true,
+            show_owner: true,
+            show_previous_transaction: true,
+            show_display: true,
+            show_content: true,
+            show_bcs: true,
+            show_storage_rebate: true,
+        }
+    )
+    .await?;
+
+// Get multiple objects
+let objects = sui.read_api()
+    .multi_get_object_with_options(
+        vec![object_id1, object_id2],
+        SuiObjectDataOptions::default().with_content()
+    )
+    .await?;
+```
+
+### Get Owned Objects
+
+```rust
+use sui_json_rpc_types::{SuiObjectDataOptions, SuiObjectResponseQuery};
+use sui_types::base_types::SuiAddress;
+
+let address = SuiAddress::from_str("0x...")?;
+
+// Get all owned objects
+let owned = sui.read_api()
+    .get_owned_objects(address, None, None, None)
+    .await?;
+
+// Filter by object type
+let query = SuiObjectResponseQuery {
+    filter: Some(SuiObjectDataFilter::StructType(
+        "0x2::coin::Coin<0x2::sui::SUI>".parse()?
+    )),
+    options: Some(SuiObjectDataOptions::default().with_content()),
+};
+
+let coins = sui.read_api()
+    .get_owned_objects(address, Some(query), None, Some(50))
+    .await?;
+```
+
+### Get Transactions
+
+```rust
+use sui_json_rpc_types::SuiTransactionBlockResponseOptions;
+use sui_types::base_types::TransactionDigest;
+
+let digest = TransactionDigest::from_str("...")?;
+
+// Get transaction with all details
+let tx = sui.read_api()
+    .get_transaction_with_options(
+        digest,
+        SuiTransactionBlockResponseOptions {
+            show_input: true,
+            show_raw_input: false,
+            show_effects: true,
+            show_events: true,
+            show_object_changes: true,
+            show_balance_changes: true,
+            show_raw_effects: false,
+        }
+    )
+    .await?;
+
+// Get multiple transactions
+let txs = sui.read_api()
+    .multi_get_transactions_with_options(
+        vec![digest1, digest2],
+        SuiTransactionBlockResponseOptions::default()
+            .with_input()
+            .with_effects()
+    )
+    .await?;
+```
+
+### Query Transactions
+
+```rust
+use sui_json_rpc_types::{SuiTransactionBlockResponseQuery, TransactionFilter};
+
+// Query by sender
+let query = SuiTransactionBlockResponseQuery {
+    filter: Some(TransactionFilter::FromAddress(sender_address)),
+    options: Some(SuiTransactionBlockResponseOptions::default()
+        .with_input()
+        .with_effects()),
+};
+
+let page = sui.read_api()
+    .query_transaction_blocks(
+        query,
+        None,      // cursor
+        Some(50),  // limit
+        false      // descending
+    )
+    .await?;
+
+// Stream all transactions
+use futures::StreamExt;
+
+let mut stream = sui.read_api()
+    .get_transactions_stream(
+        query,
+        None,
+        false
+    );
+
+while let Some(tx) = stream.next().await {
+    println!("Transaction: {:?}", tx);
+}
+```
+
+### Get Checkpoints
+
+```rust
+use sui_json_rpc_types::CheckpointId;
+
+// Get by sequence number
+let checkpoint = sui.read_api()
+    .get_checkpoint(CheckpointId::SequenceNumber(1000000))
+    .await?;
+
+// Get latest checkpoint
+let latest_seq = sui.read_api()
+    .get_latest_checkpoint_sequence_number()
+    .await?;
+
+// Get checkpoint page
+let checkpoints = sui.read_api()
+    .get_checkpoints(
+        None,      // cursor
+        Some(10),  // limit
+        false      // descending
+    )
+    .await?;
+```
+
+### Dynamic Fields
+
+```rust
+// Get dynamic fields of an object
+let fields = sui.read_api()
+    .get_dynamic_fields(parent_object_id, None, None)
+    .await?;
+
+// Get specific dynamic field
+use sui_types::dynamic_field::DynamicFieldName;
+
+let field_name = DynamicFieldName {
+    type_: "0x1::string::String".parse()?,
+    value: serde_json::json!("field_key"),
+};
+
+let field_object = sui.read_api()
+    .get_dynamic_field_object(parent_object_id, field_name)
+    .await?;
+```
+
+### Past Objects
+
+```rust
+use sui_types::base_types::SequenceNumber;
+
+// Get object at specific version
+let past_object = sui.read_api()
+    .try_get_parsed_past_object(
+        object_id,
+        SequenceNumber::from(5),
+        SuiObjectDataOptions::default().with_content()
+    )
+    .await?;
+```
+
+### Dev Inspect and Dry Run
+
+```rust
+use sui_json_rpc_types::DevInspectArgs;
+use sui_types::transaction::{TransactionData, TransactionKind};
+
+// Dry run transaction
+let tx_data: TransactionData = /* build transaction */;
+let dry_run = sui.read_api()
+    .dry_run_transaction_block(tx_data.clone())
+    .await?;
+
+println!("Gas used: {:?}", dry_run.effects.gas_used());
+
+// Dev inspect
+let tx_kind: TransactionKind = /* build transaction kind */;
+let dev_inspect = sui.read_api()
+    .dev_inspect_transaction_block(
+        sender_address,
+        tx_kind,
+        None, // gas_price
+        None, // epoch
+        Some(DevInspectArgs {
+            gas_budget: Some(10_000_000.into()),
+            gas_objects: None,
+            gas_sponsor: None,
+            skip_checks: Some(false),
+        })
+    )
+    .await?;
+```
+
+## CoinReadApi Methods
+
+The CoinReadApi specializes in coin-related queries.
+
+### Get Balances
+
+```rust
+// Get SUI balance
+let balance = sui.coin_read_api()
+    .get_balance(address, None)
+    .await?;
+
+println!("SUI Balance: {}", balance.total_balance);
+
+// Get specific coin type balance
+let usdc_balance = sui.coin_read_api()
+    .get_balance(
+        address,
+        Some("0x...::usdc::USDC".to_string())
+    )
+    .await?;
+
+// Get all balances
+let all_balances = sui.coin_read_api()
+    .get_all_balances(address)
+    .await?;
+
+for balance in all_balances {
+    println!("{}: {}", balance.coin_type, balance.total_balance);
+}
+```
+
+### Get Coins
+
+```rust
+// Get SUI coins
+let coins = sui.coin_read_api()
+    .get_coins(address, None, None, Some(50))
+    .await?;
+
+// Get specific coin type
+let usdc_coins = sui.coin_read_api()
+    .get_coins(
+        address,
+        Some("0x...::usdc::USDC".to_string()),
+        None,
+        Some(50)
+    )
+    .await?;
+
+// Get all coins (all types)
+let all_coins = sui.coin_read_api()
+    .get_all_coins(address, None, Some(100))
+    .await?;
+```
+
+### Stream Coins
+
+```rust
+use futures::StreamExt;
+
+// Stream all SUI coins
+let mut coin_stream = sui.coin_read_api()
+    .get_coins_stream(address, None);
+
+while let Some(coin) = coin_stream.next().await {
+    println!("Coin: {} balance: {}", coin.coin_object_id, coin.balance);
+}
+```
+
+### Select Coins
+
+```rust
+// Select coins to meet amount (with automatic pagination)
+let selected_coins = sui.coin_read_api()
+    .select_coins(
+        address,
+        None, // SUI
+        1_000_000_000, // 1 SUI in MIST
+        vec![] // exclude
+    )
+    .await?;
+
+println!("Selected {} coins", selected_coins.len());
+```
+
+### Coin Metadata
+
+```rust
+// Get coin metadata
+let metadata = sui.coin_read_api()
+    .get_coin_metadata("0x2::sui::SUI".to_string())
+    .await?;
+
+if let Some(meta) = metadata {
+    println!("Symbol: {}", meta.symbol);
+    println!("Decimals: {}", meta.decimals);
+    println!("Name: {}", meta.name);
+}
+
+// Get total supply
+let supply = sui.coin_read_api()
+    .get_total_supply("0x2::sui::SUI".to_string())
+    .await?;
+
+println!("Total supply: {}", supply.value);
+```
+
+## EventApi Methods
+
+The EventApi provides event querying and subscription.
+
+### Query Events
+
+```rust
+use sui_json_rpc_types::EventFilter;
+
+// Query by Move event type
+let events = sui.event_api()
+    .query_events(
+        EventFilter::MoveEventType("0x2::coin::CoinCreated".to_string()),
+        None,
+        Some(50),
+        false
+    )
+    .await?;
+
+// Query by transaction
+let tx_events = sui.event_api()
+    .get_events(transaction_digest)
+    .await?;
+```
+
+### Subscribe to Events
+
+```rust
+use futures::StreamExt;
+
+// Subscribe to all events
+let mut event_stream = sui.event_api()
+    .subscribe_event(EventFilter::All(vec![]))
+    .await?;
+
+while let Some(result) = event_stream.next().await {
+    match result {
+        Ok(event) => println!("Event: {:?}", event),
+        Err(e) => eprintln!("Error: {}", e),
+    }
+}
+```
+
+### Stream Events
+
+```rust
+use futures::StreamExt;
+
+// Stream historical events
+let mut stream = sui.event_api()
+    .get_events_stream(
+        EventFilter::MoveModule {
+            package: "0x2".parse()?,
+            module: "coin".to_string(),
+        },
+        None,
+        false
+    );
+
+while let Some(event) = stream.next().await {
+    println!("Event: {:?}", event);
+}
+```
+
+## GovernanceApi Methods
+
+The GovernanceApi provides staking and governance information.
+
+### System State
+
+```rust
+// Get latest system state
+let system_state = sui.governance_api()
+    .get_latest_sui_system_state()
+    .await?;
+
+println!("Epoch: {}", system_state.epoch);
+println!("Total Stake: {}", system_state.total_stake);
+println!("Validators: {}", system_state.active_validators.len());
+```
+
+### Staking
+
+```rust
+// Get stakes for address
+let stakes = sui.governance_api()
+    .get_stakes(address)
+    .await?;
+
+for stake in stakes {
+    println!("Validator: {}", stake.validator_address);
+    println!("Principal: {}", stake.principal);
+    println!("Estimated Reward: {}", stake.estimated_reward);
+}
+```
+
+### Gas Price and Committee
+
+```rust
+// Get reference gas price
+let gas_price = sui.governance_api()
+    .get_reference_gas_price()
+    .await?;
+
+println!("Gas price: {} MIST", gas_price);
+
+// Get committee info
+let committee = sui.governance_api()
+    .get_committee_info(None)
+    .await?;
+
+println!("Epoch: {}", committee.epoch);
+println!("Validators: {}", committee.validators.len());
+```
+
+## QuorumDriverApi Methods
+
+The QuorumDriverApi executes transactions.
+
+### Execute Transaction
+
+```rust
+use sui_types::transaction::Transaction;
+use sui_types::transaction_driver_types::ExecuteTransactionRequestType;
+
+let signed_tx: Transaction = /* sign transaction */;
+
+let response = sui.quorum_driver_api()
+    .execute_transaction_block(
+        signed_tx,
+        SuiTransactionBlockResponseOptions::default()
+            .with_effects()
+            .with_events()
+            .with_object_changes(),
+        Some(ExecuteTransactionRequestType::WaitForLocalExecution)
+    )
+    .await?;
+
+println!("Digest: {}", response.digest);
+println!("Status: {:?}", response.effects.unwrap().status());
+```
+
+## Low-Level Access
+
+### HTTP Client
+
+Access the underlying HTTP client:
+
+```rust
+let http = sui.http();
+// Make custom RPC calls
+```
+
+### WebSocket Client
+
+Access the WebSocket client if configured:
+
+```rust
+if let Some(ws) = sui.ws() {
+    // Use WebSocket client directly
+}
+```

@@ -1,0 +1,354 @@
+---
+title: Ownership Types and Rules
+description: Learn about Sui's ownership model and how it enables parallel execution and fast transaction finality.
+---
+
+Sui's ownership model is a key innovation that enables parallel transaction execution. By tracking ownership at the object level, Sui can process transactions without conflicts when they operate on different objects.
+
+## Ownership Types
+
+Every object in Sui has one of four ownership types:
+
+<CardGroup cols={2}>
+  <Card title="Owned" icon="user">
+    Owned by a single address
+  </Card>
+  <Card title="Shared" icon="users">
+    Shared among all users
+  </Card>
+  <Card title="Frozen" icon="lock">
+    Immutable and permanently read-only
+  </Card>
+  <Card title="Wrapped" icon="box">
+    Contained within another object
+  </Card>
+</CardGroup>
+
+## Owned Objects
+
+Objects owned by a single address can be used in transactions without consensus, enabling **fast-path execution**.
+
+### Creating Owned Objects
+
+```move filename="examples/move/basics/sources/object_basics.move"
+public fun create(value: u64, recipient: address, ctx: &mut TxContext) {
+    transfer::public_transfer(
+        Object { id: object::new(ctx), value },
+        recipient,
+    )
+}
+```
+
+### Transferring Ownership
+
+Sui provides two transfer functions based on visibility requirements:
+
+<Tabs>
+  <Tab title="Module-Private">
+    Use `transfer::transfer` for objects defined in your module:
+
+    ```move filename="crates/sui-framework/packages/sui-framework/sources/transfer.move"
+    /// Transfer ownership of `obj` to `recipient`. `obj` must have the `key` attribute,
+    /// which (in turn) ensures that `obj` has a globally unique ID.
+    /// This function has custom rules performed by the Sui Move bytecode verifier that ensures
+    /// that `T` is an object defined in the module where `transfer` is invoked.
+    public fun transfer<T: key>(obj: T, recipient: address) {
+        transfer_impl(obj, recipient)
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Public Transfer">
+    Use `transfer::public_transfer` for objects with `store` ability:
+
+    ```move filename="crates/sui-framework/packages/sui-framework/sources/transfer.move"
+    /// Transfer ownership of `obj` to `recipient`. `obj` must have the `key` attribute,
+    /// which (in turn) ensures that `obj` has a globally unique ID.
+    /// The object must have `store` to be transferred outside of its module.
+    public fun public_transfer<T: key + store>(obj: T, recipient: address) {
+        transfer_impl(obj, recipient)
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  The distinction between `transfer` and `public_transfer` allows module authors to control how their objects can be transferred, enabling custom transfer logic and restrictions.
+</Note>
+
+### Fast-Path Execution
+
+Owned objects enable Sui's fastest transaction mode:
+
+1. **No consensus required** - Validators process independently
+2. **Sub-second finality** - Transactions complete in ~400ms
+3. **Parallel execution** - Multiple transactions can process simultaneously
+
+## Shared Objects
+
+Shared objects are accessible by anyone but require consensus for modifications.
+
+### Creating Shared Objects
+
+```move filename="crates/sui-framework/packages/sui-framework/sources/transfer.move"
+/// Turn the given object into a mutable shared object that everyone can access and mutate.
+/// This is irreversible, i.e. once an object is shared, it will stay shared forever.
+/// Aborts with `ESharedNonNewObject` of the object being shared was not created in this
+/// transaction. This restriction may be relaxed in the future.
+public fun public_share_object<T: key + store>(obj: T) {
+    share_object_impl(obj)
+}
+```
+
+<Warning>
+  Sharing an object is **irreversible**. Once shared, an object cannot be converted back to owned or frozen.
+</Warning>
+
+### Shared Object Restrictions
+
+From the source code:
+
+```move filename="crates/sui-framework/packages/sui-framework/sources/transfer.move"
+/// Shared object operations such as wrapping, freezing, and converting to owned are not allowed.
+const ESharedObjectOperationNotSupported: u64 = 4;
+```
+
+Shared objects cannot be:
+- Wrapped inside other objects
+- Frozen
+- Converted to owned objects
+
+### Transaction Arguments
+
+Shared objects require special handling in transactions:
+
+```rust filename="crates/sui-types/src/transaction.rs"
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, Serialize, Deserialize)]
+pub enum ObjectArg {
+    // A Move object from fastpath.
+    ImmOrOwnedObject(ObjectRef),
+    // A Move object from consensus (historically consensus objects were always shared).
+    // SharedObject::mutable controls whether caller asks for a mutable reference to shared object.
+    SharedObject {
+        id: ObjectID,
+        initial_shared_version: SequenceNumber,
+        // Note: this used to be a bool, but because true/false encode to 0x00/0x01, we are able to
+        // be backward compatible.
+        mutability: SharedObjectMutability,
+    },
+    // A Move object that can be received in this transaction.
+    Receiving(ObjectRef),
+}
+```
+
+## Frozen Objects
+
+Frozen objects are permanently immutable and can be read by anyone.
+
+### Freezing Objects
+
+```move filename="examples/move/basics/sources/object_basics.move"
+public fun freeze_object(o: Object) {
+    transfer::public_freeze_object(o)
+}
+```
+
+```move filename="crates/sui-framework/packages/sui-framework/sources/transfer.move"
+/// Freeze `obj`. After freezing `obj` becomes immutable and can no longer be transferred or
+/// mutated.
+/// The object must have `store` to be frozen outside of its module.
+public fun public_freeze_object<T: key + store>(obj: T) {
+    freeze_object_impl(obj)
+}
+```
+
+### Use Cases for Frozen Objects
+
+<AccordionGroup>
+  <Accordion title="Metadata Objects">
+    Perfect for NFT metadata or token information that should never change:
+
+    ```move filename="examples/move/coin/sources/my_coin.move"
+    fun init(witness: MY_COIN, ctx: &mut TxContext) {
+        let (treasury, metadata) = coin::create_currency(
+            witness,
+            6,
+            b"MY_COIN",
+            b"",
+            b"",
+            option::none(),
+            ctx,
+        );
+        // Freezing this object makes the metadata immutable
+        transfer::public_freeze_object(metadata);
+        transfer::public_transfer(treasury, ctx.sender())
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Configuration Constants">
+    Store protocol parameters or constants that should be globally readable but never modified.
+  </Accordion>
+  
+  <Accordion title="Permanent Records">
+    Create immutable historical records or certificates.
+  </Accordion>
+</AccordionGroup>
+
+## Wrapped Objects
+
+Wrapped objects exist inside other objects and are invisible to the outside world.
+
+### Wrapping and Unwrapping
+
+```move filename="examples/move/basics/sources/object_basics.move"
+public struct Wrapper has key {
+    id: UID,
+    o: Object,
+}
+
+public fun wrap(o: Object, ctx: &mut TxContext) {
+    transfer::transfer(Wrapper { id: object::new(ctx), o }, ctx.sender());
+}
+
+#[lint_allow(self_transfer)]
+public fun unwrap(w: Wrapper, ctx: &TxContext) {
+    let Wrapper { id, o } = w;
+    id.delete();
+    transfer::public_transfer(o, ctx.sender());
+}
+```
+
+### Characteristics of Wrapped Objects
+
+<CardGroup cols={2}>
+  <Card title="Not Directly Accessible" icon="eye-slash">
+    Cannot be used as transaction inputs
+  </Card>
+  <Card title="Version Unchanged" icon="pause">
+    Version number doesn't increment while wrapped
+  </Card>
+  <Card title="Storage Efficient" icon="compress">
+    Counted as part of parent object's storage
+  </Card>
+  <Card title="Secure Encapsulation" icon="shield">
+    Only accessible through parent object's API
+  </Card>
+</CardGroup>
+
+<Warning>
+  While wrapped, objects cannot be accessed directly. You must unwrap them first or access them through their parent object.
+</Warning>
+
+## Party Transfer (Advanced)
+
+Sui supports party-based transfers for fine-grained access control:
+
+```move filename="crates/sui-framework/packages/sui-framework/sources/transfer.move"
+/// Transfer ownership of `obj` to the `party`. This transfer behaves similar to both
+/// `transfer` and `share_object`. It is similar to `transfer` in that the object is authorized for
+/// use only by the recipient(s), in this case the `party`. This means that only the members
+/// can use the object as an input to a transaction. It is similar to `share_object` two ways. One
+/// in that the object can potentially be used by anyone, as defined by the `default` permissions of
+/// the `Party` value. The other in that the object must be used in consensus and cannot be
+/// used in the fast path.
+public fun public_party_transfer<T: key + store>(obj: T, party: sui::party::Party) {
+    assert!(party.is_single_owner(), EInvalidPartyPermissions);
+    let (default, addresses, permissions) = party.into_native();
+    party_transfer_impl(obj, default, addresses, permissions)
+}
+```
+
+## Receiving Objects
+
+Sui supports receiving objects sent to other objects:
+
+```move filename="crates/sui-framework/packages/sui-framework/sources/transfer.move"
+/// This represents the ability to `receive` an object of type `T`.
+/// This type is ephemeral per-transaction and cannot be stored on-chain.
+public struct Receiving<phantom T: key> has drop {
+    id: ID,
+    version: u64,
+}
+
+/// Given mutable (i.e., locked) access to the `parent` and a `Receiving` argument
+/// referencing an object of type `T` owned by `parent` use the `to_receive`
+/// argument to receive and return the referenced owned object of type `T`.
+public fun public_receive<T: key + store>(parent: &mut UID, to_receive: Receiving<T>): T {
+    let Receiving { id, version } = to_receive;
+    receive_impl(parent.to_address(), id, version)
+}
+```
+
+## Ownership and Abilities
+
+The `store` ability determines transferability:
+
+<Tabs>
+  <Tab title="With store">
+    Objects with `store` can be:
+    - Transferred with `public_transfer`
+    - Stored in other objects
+    - Freely moved around
+
+    ```move
+    public struct Object has key, store {
+        id: UID,
+        value: u64,
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Without store">
+    Objects without `store` have restricted transfer:
+    - Only transferable within their defining module
+    - Cannot be stored in containers
+    - Provides stronger encapsulation
+
+    ```move
+    public struct RestrictedObject has key {
+        id: UID,
+        sensitive_data: vector<u8>,
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Choose the right ownership type">
+    - **Owned**: For user-specific assets (NFTs, personal tokens)
+    - **Shared**: For multi-user protocols (DEX pools, governance)
+    - **Frozen**: For immutable configuration or metadata
+    - **Wrapped**: For composition and encapsulation
+  </Accordion>
+  
+  <Accordion title="Minimize shared object usage">
+    Shared objects require consensus and are slower. Use owned objects when possible:
+    - Split shared state into multiple owned objects
+    - Use capability patterns for access control
+    - Consider flash loans instead of direct shared access
+  </Accordion>
+  
+  <Accordion title="Be careful with irreversible operations">
+    These operations cannot be undone:
+    - Sharing an object
+    - Freezing an object
+    - Deleting an object
+  </Accordion>
+</AccordionGroup>
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="Objects" href="/concepts/objects" icon="cube">
+    Understand Sui's object model
+  </Card>
+  <Card title="Dynamic Fields" href="/concepts/dynamic-fields" icon="layer-group">
+    Extend objects dynamically
+  </Card>
+  <Card title="Transactions" href="/concepts/transactions" icon="arrow-right-arrow-left">
+    Learn about transaction structure
+  </Card>
+</CardGroup>

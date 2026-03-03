@@ -1,0 +1,263 @@
+---
+title: System Requirements
+description: Hardware and software requirements for running Sui fullnodes and validators.
+---
+
+This page outlines the minimum and recommended system requirements for running Sui nodes.
+
+## Validator Requirements
+
+Validators participate in consensus and require higher performance hardware:
+
+### Hardware
+
+| Component | Minimum Specification | Recommended Specification |
+|-----------|----------------------|---------------------------|
+| CPU | 24 physical cores | 48+ physical cores |
+| Memory | 128 GB RAM | 256 GB RAM |
+| Storage | 4 TB NVMe SSD | 8 TB+ NVMe SSD |
+| Network | 1 Gbps | 10 Gbps |
+
+### CPU Requirements
+
+- **Architecture**: x86_64 (AMD64) or ARM64
+- **Features**: AVX2 instruction set recommended for cryptographic operations
+- **Cores**: 24 physical cores minimum (48 virtual cores with hyperthreading)
+- **Performance**: High single-thread performance for consensus operations
+
+### Memory Requirements
+
+- **Minimum**: 128 GB RAM
+- **Recommended**: 256 GB RAM for production validators
+- **Swap**: Not recommended; validators should not swap to disk
+
+### Storage Requirements
+
+- **Type**: NVMe SSD required (SATA SSDs are too slow)
+- **Capacity**: 4 TB minimum, 8 TB+ recommended
+- **IOPS**: 10,000+ random read/write IOPS
+- **Throughput**: 500+ MB/s sequential read/write
+- **Latency**: Less than 1ms average latency
+
+#### Storage Growth
+
+The blockchain database grows continuously:
+- **Rate**: Approximately 50-100 GB per month (network dependent)
+- **Pruning**: Configure `authority-store-pruning-config` to manage growth
+- **Planning**: Provision at least 12 months of growth capacity
+
+### Network Requirements
+
+- **Bandwidth**: 1 Gbps minimum, 10 Gbps recommended
+- **Latency**: Less than 100ms to other validators (lower is better)
+- **Reliability**: Stable connection with less than 1% packet loss
+- **IPv4**: Required (IPv6 optional)
+
+#### Required Ports
+
+| Port | Protocol | Direction | Purpose |
+|------|----------|-----------|----------|
+| 8080 | TCP | Inbound | Protocol/transaction interface |
+| 8081 | TCP/UDP | Inbound/Outbound | Consensus interface |
+| 8082 | UDP | Inbound/Outbound | Narwhal worker |
+| 8084 | UDP | Inbound/Outbound | P2P state sync |
+| 8443 | TCP | Outbound | Metrics push |
+| 9184 | TCP | Localhost | Metrics scraping |
+
+## Fullnode Requirements
+
+Fullnodes store blockchain state and serve RPC requests but do not participate in consensus:
+
+### Hardware
+
+| Component | Minimum Specification | Recommended Specification |
+|-----------|----------------------|---------------------------|
+| CPU | 8 cores | 16+ cores |
+| Memory | 32 GB RAM | 64 GB RAM |
+| Storage | 2 TB SSD | 4 TB+ NVMe SSD |
+| Network | 500 Mbps | 1 Gbps |
+
+### CPU Requirements
+
+- **Architecture**: x86_64 (AMD64) or ARM64
+- **Cores**: 8 cores minimum, 16+ cores recommended
+- **Features**: AVX2 support recommended
+
+### Memory Requirements
+
+- **Minimum**: 32 GB RAM
+- **Recommended**: 64 GB RAM for production fullnodes serving RPC traffic
+- **Swap**: Limited swap acceptable (not recommended for performance)
+
+### Storage Requirements
+
+- **Type**: SSD required (NVMe recommended for high-traffic nodes)
+- **Capacity**: 2 TB minimum, 4 TB+ recommended
+- **IOPS**: 5,000+ random read/write IOPS
+- **Throughput**: 200+ MB/s sequential read/write
+
+### Network Requirements
+
+- **Bandwidth**: 500 Mbps minimum, 1 Gbps recommended
+- **Latency**: less than 200ms to validators (lower is better)
+- **IPv4**: Required
+
+#### Required Ports
+
+| Port | Protocol | Purpose |
+|------|----------|----------|
+| 8080 | TCP | Transaction interface |
+| 8084 | UDP | P2P state sync |
+| 9000 | TCP | JSON-RPC interface |
+| 9184 | TCP | Metrics (localhost) |
+
+## Operating System
+
+### Supported Operating Systems
+
+- **Linux**: Ubuntu 20.04 LTS, Ubuntu 22.04 LTS, Debian 11+ (recommended)
+- **macOS**: macOS 12+ (development only, not recommended for production)
+- **Windows**: Not officially supported
+
+### Linux Distribution Recommendations
+
+- **Ubuntu 22.04 LTS**: Recommended for most users
+- **Debian 11+**: Good alternative with long-term support
+- **RHEL 8+/Rocky Linux**: Suitable for enterprise environments
+
+### Required Software
+
+- **Kernel**: Linux kernel 5.4+
+- **libc**: glibc 2.31+ or musl libc
+- **systemd**: For service management (recommended)
+- **Docker**: 20.10+ (if using containerized deployment)
+
+## Environment Variables
+
+Key environment variables for node operation:
+
+```bash
+# Logging configuration
+RUST_LOG=info,sui_core=debug,consensus=debug,jsonrpsee=error
+RUST_LOG_JSON=1  # Enable JSON structured logging
+
+# Backtrace on errors
+RUST_BACKTRACE=1
+
+# Database configuration
+SUI_DB_SYNC_TO_DISK=true  # Enable fsync for durability
+
+# Cache sizing (optional)
+SUI_MAX_CACHE_SIZE=100000
+SUI_PACKAGE_CACHE_SIZE=1000
+SUI_OBJECT_CACHE_SIZE=100000
+```
+
+## Performance Tuning
+
+### File Descriptors
+
+Increase the file descriptor limit:
+
+```bash
+# Add to /etc/security/limits.conf
+sui soft nofile 65535
+sui hard nofile 65535
+```
+
+### TCP/IP Stack
+
+Optimize network settings for high-throughput connections:
+
+```bash
+# Add to /etc/sysctl.conf
+net.core.rmem_max = 134217728
+net.core.wmem_max = 134217728
+net.ipv4.tcp_rmem = 4096 87380 67108864
+net.ipv4.tcp_wmem = 4096 65536 67108864
+net.ipv4.tcp_congestion_control = bbr
+```
+
+Apply settings:
+
+```bash
+sudo sysctl -p
+```
+
+### Disk I/O Scheduler
+
+Use the `none` or `kyber` scheduler for NVMe drives:
+
+```bash
+echo none | sudo tee /sys/block/nvme0n1/queue/scheduler
+```
+
+## Monitoring Requirements
+
+Ensure adequate resources for monitoring infrastructure:
+
+- **Prometheus**: 20 GB disk, 4 GB RAM
+- **Grafana**: 10 GB disk, 2 GB RAM
+- **Log aggregation**: Size based on retention requirements
+
+## Backup and Recovery
+
+Plan for backup infrastructure:
+
+- **Snapshot storage**: 2x node database size
+- **Backup bandwidth**: Sufficient for daily snapshots
+- **Recovery time objective (RTO)**: less than 4 hours recommended
+
+## Cloud Provider Recommendations
+
+### AWS Instance Types
+
+**Validators**:
+- `r6i.8xlarge` (32 vCPUs, 256 GB RAM)
+- `r6i.12xlarge` (48 vCPUs, 384 GB RAM)
+- Storage: `io2` volumes with provisioned IOPS
+
+**Fullnodes**:
+- `m6i.4xlarge` (16 vCPUs, 64 GB RAM)
+- Storage: `gp3` volumes with 3,000+ IOPS
+
+### Google Cloud Instance Types
+
+**Validators**:
+- `n2-highmem-32` (32 vCPUs, 256 GB RAM)
+- `n2-highmem-48` (48 vCPUs, 384 GB RAM)
+- Storage: SSD persistent disks
+
+**Fullnodes**:
+- `n2-highmem-16` (16 vCPUs, 128 GB RAM)
+- Storage: Balanced persistent disks
+
+### Azure Instance Types
+
+**Validators**:
+- `Standard_E32s_v5` (32 vCPUs, 256 GB RAM)
+- Storage: Premium SSD with P50 or higher
+
+**Fullnodes**:
+- `Standard_E16s_v5` (16 vCPUs, 128 GB RAM)
+- Storage: Premium SSD
+
+## Cost Estimation
+
+Monthly operating costs (approximate):
+
+**Validator**:
+- Cloud compute: $2,000-4,000/month
+- Storage: $500-1,000/month
+- Network: $100-500/month
+- **Total**: $2,600-5,500/month
+
+**Fullnode**:
+- Cloud compute: $500-1,000/month
+- Storage: $200-400/month
+- Network: $50-200/month
+- **Total**: $750-1,600/month
+
+<Note>
+  Bare metal hosting typically reduces costs by 40-60% compared to cloud providers.
+</Note>

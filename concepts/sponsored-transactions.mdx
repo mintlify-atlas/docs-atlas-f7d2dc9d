@@ -1,0 +1,520 @@
+---
+title: Sponsored Transactions
+description: Enable gasless transactions by having a sponsor pay for gas on behalf of users.
+---
+
+Sponsored transactions allow one party (the sponsor) to pay for another party's (the user's) transaction gas fees. This is crucial for improving user onboarding and creating seamless Web3 experiences.
+
+## How Sponsored Transactions Work
+
+In a sponsored transaction:
+
+<Steps>
+  <Step title="User builds transaction">
+    User creates and signs the transaction with their intent
+  </Step>
+  <Step title="Sponsor is designated">
+    Transaction specifies a different address as the gas owner
+  </Step>
+  <Step title="Sponsor signs separately">
+    Sponsor reviews and signs to approve paying for gas
+  </Step>
+  <Step title="Transaction executes">
+    Gas is deducted from sponsor's gas coins
+  </Step>
+</Steps>
+
+## Basic Implementation
+
+### TypeScript SDK
+
+```typescript
+import { Transaction } from '@mysten/sui/transactions';
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
+
+// User creates transaction
+const userKeypair = Ed25519Keypair.deriveKeypair(userMnemonic);
+const sponsorKeypair = Ed25519Keypair.deriveKeypair(sponsorMnemonic);
+
+const tx = new Transaction();
+tx.moveCall({
+    target: `${packageId}::module::function`,
+    arguments: [/* ... */],
+});
+
+// Set sponsor as gas owner
+tx.setGasOwner(sponsorKeypair.toSuiAddress());
+
+// User signs transaction
+const userSignature = await tx.sign({ client, signer: userKeypair });
+
+// Sponsor signs transaction
+const sponsorSignature = await tx.sign({ client, signer: sponsorKeypair });
+
+// Execute with both signatures
+const result = await client.executeTransactionBlock({
+    transactionBlock: userSignature.bytes,
+    signature: [userSignature.signature, sponsorSignature.signature],
+});
+```
+
+## Withdrawal from Sponsor
+
+With address balances, sponsors can allow users to withdraw funds directly:
+
+```rust filename="crates/sui-types/src/transaction.rs"
+pub struct FundsWithdrawalArg {
+    /// The reservation of the funds accumulator to withdraw
+    pub reservation: Reservation,
+    /// The type argument of the funds accumulator to withdraw
+    pub type_arg: WithdrawalTypeArg,
+    /// The source of the funds to withdraw
+    pub withdraw_from: WithdrawFrom,
+}
+
+pub enum WithdrawFrom {
+    /// Withdraw from the sender of the transaction
+    Sender,
+    /// Withdraw from the sponsor of the transaction (gas owner)
+    Sponsor,
+}
+
+impl FundsWithdrawalArg {
+    /// Withdraws from `Balance<balance_type>` in the sponsor's address (gas owner)
+    pub fn balance_from_sponsor(amount: u64, balance_type: TypeTag) -> Self {
+        Self {
+            reservation: Reservation::MaxAmountU64(amount),
+            type_arg: WithdrawalTypeArg::Balance(balance_type),
+            withdraw_from: WithdrawFrom::Sponsor,
+        }
+    }
+
+    pub fn owner_for_withdrawal(&self, tx: &impl TransactionDataAPI) -> SuiAddress {
+        match self.withdraw_from {
+            WithdrawFrom::Sender => tx.sender(),
+            WithdrawFrom::Sponsor => tx.gas_owner(),
+        }
+    }
+}
+```
+
+<Note>
+  This allows users to perform actions using the sponsor's balance without the sponsor needing to transfer coins first.
+</Note>
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="User Onboarding" icon="user-plus">
+    Let new users try your app without acquiring SUI first
+  </Card>
+  <Card title="Gaming" icon="gamepad">
+    Players focus on gameplay without managing gas
+  </Card>
+  <Card title="Enterprise Apps" icon="building">
+    Company pays for employee transactions
+  </Card>
+  <Card title="DAO Operations" icon="users">
+    Treasury sponsors member transactions
+  </Card>
+</CardGroup>
+
+## Sponsor Service Architecture
+
+A typical sponsor service:
+
+```typescript
+import express from 'express';
+import { SuiClient } from '@mysten/sui/client';
+import { Transaction } from '@mysten/sui/transactions';
+
+const app = express();
+const client = new SuiClient({ url: RPC_URL });
+const sponsorKeypair = /* load from secure storage */;
+
+// Rate limiting and security
+const rateLimiter = /* implement rate limiting */;
+const requestValidator = /* implement validation */;
+
+app.post('/sponsor', rateLimiter, async (req, res) => {
+    try {
+        const { transactionBytes, userSignature } = req.body;
+        
+        // Validate request
+        if (!requestValidator.isValid(req)) {
+            return res.status(400).json({ error: 'Invalid request' });
+        }
+        
+        // Validate transaction doesn't do anything malicious
+        const tx = Transaction.from(transactionBytes);
+        if (!isTransactionSafe(tx)) {
+            return res.status(403).json({ error: 'Unsafe transaction' });
+        }
+        
+        // Check gas budget is reasonable
+        const gasBudget = tx.getData().gasData.budget;
+        if (gasBudget > MAX_SPONSORED_GAS) {
+            return res.status(400).json({ error: 'Gas budget too high' });
+        }
+        
+        // Sponsor signs
+        const sponsorSignature = await tx.sign({
+            client,
+            signer: sponsorKeypair,
+        });
+        
+        // Execute transaction
+        const result = await client.executeTransactionBlock({
+            transactionBlock: transactionBytes,
+            signature: [userSignature, sponsorSignature.signature],
+        });
+        
+        res.json({
+            digest: result.digest,
+            effects: result.effects,
+        });
+    } catch (error) {
+        console.error('Sponsorship error:', error);
+        res.status(500).json({ error: 'Sponsorship failed' });
+    }
+});
+
+function isTransactionSafe(tx: Transaction): boolean {
+    // Implement safety checks:
+    // - Whitelist of allowed modules/functions
+    // - Check transaction doesn't transfer sponsor's assets
+    // - Validate arguments are reasonable
+    // - etc.
+    return true; // placeholder
+}
+```
+
+## Security Considerations
+
+<Warning>
+  Sponsors must carefully validate transactions to prevent abuse. Malicious users could craft transactions that drain the sponsor's balance or perform unwanted actions.
+</Warning>
+
+### Validation Checklist
+
+<AccordionGroup>
+  <Accordion title="Gas Budget Limits">
+    Set maximum gas budget to prevent excessive costs:
+    
+    ```typescript
+    const MAX_SPONSORED_GAS = 10_000_000; // 10M gas units
+    
+    if (tx.getData().gasData.budget > MAX_SPONSORED_GAS) {
+        throw new Error('Gas budget exceeds limit');
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Function Whitelist">
+    Only sponsor calls to approved functions:
+    
+    ```typescript
+    const ALLOWED_FUNCTIONS = [
+        `${MY_PACKAGE}::game::play_move`,
+        `${MY_PACKAGE}::game::claim_reward`,
+    ];
+    
+    function validateMoveCall(target: string): boolean {
+        return ALLOWED_FUNCTIONS.includes(target);
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Rate Limiting">
+    Prevent spam and abuse:
+    
+    ```typescript
+    import rateLimit from 'express-rate-limit';
+    
+    const limiter = rateLimit({
+        windowMs: 15 * 60 * 1000, // 15 minutes
+        max: 100, // limit each user to 100 requests per window
+        keyGenerator: (req) => req.body.userAddress,
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="User Authentication">
+    Verify user identity before sponsoring:
+    
+    ```typescript
+    // Require signature over challenge to prove ownership
+    const challenge = generateChallenge();
+    const signature = await userKeypair.sign(challenge);
+    
+    if (!verifySignature(signature, userAddress, challenge)) {
+        throw new Error('Invalid user authentication');
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Balance Monitoring">
+    Track sponsor balance and alert when low:
+    
+    ```typescript
+    const sponsorBalance = await client.getBalance({
+        owner: sponsorAddress,
+    });
+    
+    if (BigInt(sponsorBalance.totalBalance) < MINIMUM_BALANCE) {
+        await alertAdmin('Sponsor balance low');
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Advanced Patterns
+
+### Conditional Sponsorship
+
+Sponsor only specific types of transactions:
+
+```typescript
+interface SponsorshipPolicy {
+    canSponsor(tx: Transaction, user: string): Promise<boolean>;
+}
+
+class GameSponsorshipPolicy implements SponsorshipPolicy {
+    async canSponsor(tx: Transaction, user: string): Promise<boolean> {
+        // Check user has NFT or is active player
+        const hasNFT = await checkUserHasGameNFT(user);
+        if (!hasNFT) return false;
+        
+        // Check transaction is game-related
+        const calls = tx.getData().commands;
+        return calls.every(cmd => 
+            cmd.kind === 'MoveCall' && 
+            cmd.target.startsWith(`${GAME_PACKAGE}::`)
+        );
+    }
+}
+```
+
+### Quota-Based Sponsorship
+
+Limit sponsorship per user:
+
+```typescript
+class QuotaManager {
+    private quotas = new Map<string, number>();
+    
+    async checkAndDeduct(user: string, gasCost: number): Promise<boolean> {
+        const remaining = this.quotas.get(user) ?? DAILY_QUOTA;
+        
+        if (remaining < gasCost) {
+            return false;
+        }
+        
+        this.quotas.set(user, remaining - gasCost);
+        return true;
+    }
+    
+    async resetDaily() {
+        this.quotas.clear();
+    }
+}
+```
+
+### Transaction Batching
+
+Sponsor multiple operations in one transaction:
+
+```typescript
+const tx = new Transaction();
+
+// User operations
+tx.moveCall({
+    target: `${packageId}::game::action1`,
+    arguments: [/* ... */],
+});
+
+tx.moveCall({
+    target: `${packageId}::game::action2`,
+    arguments: [/* ... */],
+});
+
+// Sponsor pays for all operations
+tx.setGasOwner(sponsorAddress);
+```
+
+## Client Integration
+
+### React Hook Example
+
+```typescript
+import { useSignAndExecuteTransaction } from '@mysten/dapp-kit';
+import { useState } from 'react';
+
+function useSponsoredTransaction() {
+    const { mutateAsync: signTransaction } = useSignAndExecuteTransaction();
+    const [isPending, setIsPending] = useState(false);
+    
+    async function executeSponsored(tx: Transaction) {
+        setIsPending(true);
+        try {
+            // Set sponsor
+            tx.setGasOwner(SPONSOR_ADDRESS);
+            
+            // User signs
+            const userSig = await signTransaction({
+                transaction: tx,
+            });
+            
+            // Request sponsor signature
+            const response = await fetch('/api/sponsor', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    transactionBytes: userSig.bytes,
+                    userSignature: userSig.signature,
+                }),
+            });
+            
+            const result = await response.json();
+            return result;
+        } finally {
+            setIsPending(false);
+        }
+    }
+    
+    return { executeSponsored, isPending };
+}
+```
+
+## Cost Management
+
+### Estimating Sponsorship Costs
+
+```typescript
+async function estimateMonthlyCost(
+    avgTransactionsPerUser: number,
+    avgGasPerTx: number,
+    activeUsers: number,
+) {
+    const rgp = await client.getReferenceGasPrice();
+    
+    const totalTxPerMonth = avgTransactionsPerUser * activeUsers * 30;
+    const totalGas = totalTxPerMonth * avgGasPerTx;
+    const costInMIST = totalGas * Number(rgp);
+    const costInSUI = costInMIST / 1_000_000_000;
+    
+    return {
+        totalTransactions: totalTxPerMonth,
+        costInSUI,
+        costPerUser: costInSUI / activeUsers,
+    };
+}
+
+// Usage
+const estimate = await estimateMonthlyCost(
+    10,      // 10 transactions per user per day
+    100_000, // 100k gas per transaction
+    1000,    // 1000 active users
+);
+
+console.log(`Monthly sponsorship cost: ${estimate.costInSUI} SUI`);
+console.log(`Cost per user: ${estimate.costPerUser} SUI`);
+```
+
+### Monitoring and Alerts
+
+```typescript
+class SponsorMonitor {
+    async checkHealth() {
+        const balance = await client.getBalance({
+            owner: SPONSOR_ADDRESS,
+        });
+        
+        const balanceSUI = Number(balance.totalBalance) / 1e9;
+        
+        if (balanceSUI < CRITICAL_BALANCE) {
+            await this.alert('CRITICAL: Sponsor balance very low');
+        } else if (balanceSUI < WARNING_BALANCE) {
+            await this.alert('WARNING: Sponsor balance low');
+        }
+        
+        return {
+            balance: balanceSUI,
+            status: balanceSUI > WARNING_BALANCE ? 'healthy' : 'warning',
+        };
+    }
+    
+    async logTransaction(tx: string, cost: number) {
+        // Log to database/analytics
+        await db.sponsorshipLogs.insert({
+            timestamp: Date.now(),
+            transaction: tx,
+            gasUsed: cost,
+        });
+    }
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Start with tight restrictions">
+    Begin with strict limits and relax as needed:
+    
+    ```typescript
+    const INITIAL_POLICY = {
+        maxGasPerTx: 1_000_000,
+        maxTxPerDay: 10,
+        allowedFunctions: ['basic_operation'],
+    };
+    ```
+  </Accordion>
+  
+  <Accordion title="Log all sponsored transactions">
+    Maintain audit trail for analysis:
+    
+    ```typescript
+    await logSponsoredTx({
+        user: userAddress,
+        transaction: txDigest,
+        gasCost: gasUsed,
+        timestamp: Date.now(),
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Implement circuit breakers">
+    Stop sponsorship if abuse detected:
+    
+    ```typescript
+    if (await detectAnomalousActivity(userAddress)) {
+        await pauseSponsorship(userAddress);
+        await alertSecurityTeam();
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Use separate sponsor accounts">
+    Isolate sponsor funds from main treasury:
+    
+    ```typescript
+    // Don't use same account for sponsorship and asset storage
+    const SPONSOR_ACCOUNT = '0xabc...';
+    const TREASURY_ACCOUNT = '0xdef...';
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="Gas Pricing" href="/concepts/gas-pricing" icon="gas-pump">
+    Understand gas costs
+  </Card>
+  <Card title="Transactions" href="/concepts/transactions" icon="arrow-right-arrow-left">
+    Learn about transactions
+  </Card>
+  <Card title="Transaction Lifecycle" href="/concepts/transaction-lifecycle" icon="clock">
+    Follow transaction execution
+  </Card>
+</CardGroup>

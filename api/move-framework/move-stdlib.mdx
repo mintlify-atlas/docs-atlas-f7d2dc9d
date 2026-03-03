@@ -1,0 +1,401 @@
+---
+title: Move Standard Library
+description: Core Move language standard library modules
+---
+
+The Move Standard Library provides fundamental data structures and utilities used across Move programs. These modules are published at `0x1`.
+
+## Core Modules
+
+### vector.move
+
+Provides operations on vectors (dynamic arrays).
+
+**Key Functions:**
+```move
+// Create empty vector
+public fun empty<T>(): vector<T>
+
+// Get length
+public fun length<T>(v: &vector<T>): u64
+
+// Push to back
+public fun push_back<T>(v: &mut vector<T>, e: T)
+
+// Pop from back
+public fun pop_back<T>(v: &mut vector<T>): T
+
+// Borrow element
+public fun borrow<T>(v: &vector<T>, i: u64): &T
+
+// Borrow mutable
+public fun borrow_mut<T>(v: &mut vector<T>, i: u64): &mut T
+
+// Swap elements
+public fun swap<T>(v: &mut vector<T>, i: u64, j: u64)
+
+// Reverse vector
+public fun reverse<T>(v: &mut vector<T>)
+
+// Append vector
+public fun append<T>(v1: &mut vector<T>, v2: vector<T>)
+
+// Check if empty
+public fun is_empty<T>(v: &vector<T>): bool
+
+// Check if contains
+public fun contains<T>(v: &vector<T>, e: &T): bool
+
+// Index of element
+public fun index_of<T>(v: &vector<T>, e: &T): (bool, u64)
+
+// Remove element
+public fun remove<T>(v: &mut vector<T>, i: u64): T
+
+// Destroy empty vector
+public fun destroy_empty<T>(v: vector<T>)
+```
+
+**Example:**
+```move
+use std::vector;
+
+let mut v = vector::empty<u64>();
+vector::push_back(&mut v, 1);
+vector::push_back(&mut v, 2);
+vector::push_back(&mut v, 3);
+
+assert!(vector::length(&v) == 3, 0);
+assert!(*vector::borrow(&v, 0) == 1, 1);
+
+let last = vector::pop_back(&mut v);
+assert!(last == 3, 2);
+```
+
+---
+
+### option.move
+
+Provides optional value handling.
+
+**Key Types:**
+- `Option<T>` - Either `Some(T)` or `None`
+
+**Key Functions:**
+```move
+// Create None
+public fun none<T>(): Option<T>
+
+// Create Some
+public fun some<T>(value: T): Option<T>
+
+// Check if is some
+public fun is_some<T>(opt: &Option<T>): bool
+
+// Check if is none
+public fun is_none<T>(opt: &Option<T>): bool
+
+// Borrow value (aborts if None)
+public fun borrow<T>(opt: &Option<T>): &T
+
+// Borrow mutable
+public fun borrow_mut<T>(opt: &mut Option<T>): &mut T
+
+// Extract value (aborts if None)
+public fun extract<T>(opt: &mut Option<T>): T
+
+// Get value or default
+public fun get_with_default<T: copy + drop>(opt: &Option<T>, default: T): T
+
+// Destroy None
+public fun destroy_none<T>(opt: Option<T>)
+
+// Destroy Some
+public fun destroy_some<T>(opt: Option<T>): T
+```
+
+**Example:**
+```move
+use std::option::{Self, Option};
+
+let opt = option::some(42u64);
+assert!(option::is_some(&opt), 0);
+assert!(*option::borrow(&opt) == 42, 1);
+
+let value = option::extract(&mut opt);
+assert!(value == 42, 2);
+assert!(option::is_none(&opt), 3);
+```
+
+---
+
+### string.move
+
+Provides UTF-8 string handling.
+
+**Key Types:**
+- `String` - UTF-8 encoded string
+
+**Key Functions:**
+```move
+// Create from bytes (validates UTF-8)
+public fun utf8(bytes: vector<u8>): String
+
+// Try create (returns option)
+public fun try_utf8(bytes: vector<u8>): Option<String>
+
+// Get bytes
+public fun bytes(s: &String): &vector<u8>
+
+// Get length
+public fun length(s: &String): u64
+
+// Check if empty
+public fun is_empty(s: &String): bool
+
+// Append string
+public fun append(s: &mut String, other: String)
+
+// Substring
+public fun sub_string(s: &String, start: u64, end: u64): String
+```
+
+**Example:**
+```move
+use std::string::{Self, String};
+
+let s = string::utf8(b"Hello, Sui!");
+assert!(string::length(&s) == 11, 0);
+
+let mut s2 = string::utf8(b"Hello");
+string::append(&mut s2, string::utf8(b", World!"));
+assert!(s2 == string::utf8(b"Hello, World!"), 1);
+```
+
+---
+
+### ascii.move
+
+Provides ASCII string handling.
+
+**Key Types:**
+- `String` - ASCII-only string
+
+**Key Functions:**
+```move
+// Create from bytes (validates ASCII)
+public fun string(bytes: vector<u8>): String
+
+// Try create (returns option)
+public fun try_string(bytes: vector<u8>): Option<String>
+
+// Convert to bytes
+public fun into_bytes(s: String): vector<u8>
+
+// Get bytes reference
+public fun as_bytes(s: &String): &vector<u8>
+
+// Get length
+public fun length(s: &String): u64
+
+// Check if is valid ASCII
+public fun is_valid_char(byte: u8): bool
+```
+
+---
+
+### type_name.move
+
+Provides runtime type information.
+
+**Key Types:**
+- `TypeName` - Runtime type representation
+
+**Key Functions:**
+```move
+// Get type name
+public fun get<T>(): TypeName
+
+// Convert to string
+public fun into_string(name: TypeName): String
+
+// Get address
+public fun get_address(name: &TypeName): address
+
+// Get module name
+public fun get_module(name: &TypeName): &String
+```
+
+**Example:**
+```move
+use std::type_name;
+use sui::sui::SUI;
+
+let type_name = type_name::get<SUI>();
+let type_str = type_name::into_string(type_name);
+// type_str == "0x2::sui::SUI"
+```
+
+---
+
+### bcs.move
+
+Provides Binary Canonical Serialization.
+
+**Key Functions:**
+```move
+// Serialize to bytes
+public fun to_bytes<T>(value: &T): vector<u8>
+```
+
+**Example:**
+```move
+use std::bcs;
+
+let value = 42u64;
+let bytes = bcs::to_bytes(&value);
+```
+
+---
+
+### fixed_point32.move
+
+Provides fixed-point arithmetic with 32-bit precision.
+
+**Key Types:**
+- `FixedPoint32` - Fixed-point number
+
+**Key Functions:**
+```move
+// Create from raw value
+public fun create_from_raw_value(value: u64): FixedPoint32
+
+// Create from rational
+public fun create_from_rational(numerator: u64, denominator: u64): FixedPoint32
+
+// Get raw value
+public fun get_raw_value(num: FixedPoint32): u64
+
+// Multiply u64 by fixed point
+public fun multiply_u64(num: u64, multiplier: FixedPoint32): u64
+
+// Divide u64 by fixed point
+public fun divide_u64(num: u64, divisor: FixedPoint32): u64
+```
+
+---
+
+### hash.move
+
+Provides cryptographic hash functions.
+
+**Key Functions:**
+```move
+// SHA2-256 hash
+public fun sha2_256(data: vector<u8>): vector<u8>
+
+// SHA3-256 hash
+public fun sha3_256(data: vector<u8>): vector<u8>
+```
+
+---
+
+## Integer Modules
+
+Provide utilities for different integer sizes:
+
+### u8, u16, u32, u64, u128, u256
+
+```move
+// Maximum value
+public fun max(): T
+
+// Minimum value
+public fun min(): T
+```
+
+---
+
+## Boolean Module
+
+### bool.move
+
+```move
+// Negate
+public fun not(b: bool): bool
+```
+
+---
+
+## Common Patterns
+
+### Working with Vectors
+
+```move
+use std::vector;
+
+public fun process_items(items: vector<u64>): u64 {
+    let mut sum = 0;
+    let mut i = 0;
+    let len = vector::length(&items);
+    
+    while (i < len) {
+        sum = sum + *vector::borrow(&items, i);
+        i = i + 1;
+    };
+    
+    sum
+}
+```
+
+### Optional Values
+
+```move
+use std::option::{Self, Option};
+
+struct Config has key {
+    id: UID,
+    admin: Option<address>,
+}
+
+public fun set_admin(config: &mut Config, admin: address) {
+    if (option::is_some(&config.admin)) {
+        option::extract(&mut config.admin);
+    };
+    option::fill(&mut config.admin, admin);
+}
+```
+
+### String Building
+
+```move
+use std::string::{Self, String};
+
+public fun build_message(name: String, age: u64): String {
+    let mut msg = string::utf8(b"Hello, ");
+    string::append(&mut msg, name);
+    string::append(&mut msg, string::utf8(b"! You are "));
+    // Note: need to convert u64 to string first
+    msg
+}
+```
+
+## Full Module List
+
+The Move Standard Library at `0x1` includes:
+
+- `vector` - Dynamic arrays
+- `option` - Optional values
+- `string` - UTF-8 strings
+- `ascii` - ASCII strings
+- `type_name` - Runtime types
+- `bcs` - Serialization
+- `fixed_point32` - Fixed-point math
+- `hash` - Hash functions
+- `u8`, `u16`, `u32`, `u64`, `u128`, `u256` - Integer utilities
+- `bool` - Boolean utilities
+- `bit_vector` - Bit vectors
+- `uq32_32` - Unsigned Q32.32 fixed-point
+- `uq64_64` - Unsigned Q64.64 fixed-point
+- `debug` - Debugging utilities
+- `unit_test` - Testing framework

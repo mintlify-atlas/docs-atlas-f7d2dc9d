@@ -1,0 +1,465 @@
+---
+title: Move Language Introduction
+description: Learn about Move, the secure programming language designed for digital assets on Sui.
+---
+
+Move is a safe and expressive programming language designed specifically for blockchains. Originally created at Facebook for the Diem project, Sui has adapted and extended Move with unique features for its object-centric architecture.
+
+## Why Move?
+
+Move was designed from the ground up to address common security issues in smart contracts:
+
+<CardGroup cols={2}>
+  <Card title="Resource Safety" icon="shield-check">
+    Assets cannot be copied or accidentally destroyed
+  </Card>
+  <Card title="Type Safety" icon="code">
+    Strong typing prevents many classes of bugs
+  </Card>
+  <Card title="Formal Verification" icon="check-double">
+    Code can be mathematically proven correct
+  </Card>
+  <Card title="Modular Design" icon="cubes">
+    Reusable modules and clear dependencies
+  </Card>
+</CardGroup>
+
+## Move on Sui
+
+Sui extends Move with object-centric features:
+
+### Objects vs Resources
+
+While traditional Move uses "resources", Sui uses "objects" with unique IDs:
+
+```move
+// Sui object with UID
+public struct MyObject has key {
+    id: UID,
+    value: u64,
+}
+
+// Traditional Move resource (not used in Sui)
+// struct MyResource has key, store {
+//     value: u64,
+// }
+```
+
+<Note>
+  Every Sui object must have `id: UID` as its first field. The `UID` type ensures global uniqueness.
+</Note>
+
+## Basic Syntax
+
+### Module Structure
+
+```move
+module my_package::my_module {
+    // Imports
+    use sui::object::{Self, UID};
+    use sui::transfer;
+    use sui::tx_context::TxContext;
+
+    // Structs
+    public struct MyObject has key {
+        id: UID,
+        value: u64,
+    }
+
+    // Functions
+    public fun create(value: u64, ctx: &mut TxContext) {
+        let obj = MyObject {
+            id: object::new(ctx),
+            value,
+        };
+        transfer::transfer(obj, ctx.sender());
+    }
+}
+```
+
+### Primitive Types
+
+Move supports several primitive types:
+
+<Tabs>
+  <Tab title="Integers">
+    ```move
+    let u8_val: u8 = 255;
+    let u16_val: u16 = 65535;
+    let u32_val: u32 = 4294967295;
+    let u64_val: u64 = 18446744073709551615;
+    let u128_val: u128 = 340282366920938463463374607431768211455;
+    let u256_val: u256 = 1000000;
+    ```
+  </Tab>
+  
+  <Tab title="Booleans">
+    ```move
+    let is_true: bool = true;
+    let is_false: bool = false;
+    
+    // Boolean operators
+    let and_result = true && false;  // false
+    let or_result = true || false;   // true
+    let not_result = !true;          // false
+    ```
+  </Tab>
+  
+  <Tab title="Addresses">
+    ```move
+    let addr1: address = @0x1;
+    let addr2: address = @0xCAFE;
+    let sender = tx_context::sender(ctx);
+    ```
+  </Tab>
+  
+  <Tab title="Vectors">
+    ```move filename="crates/sui-framework/packages/move-stdlib/sources/vector.move"
+    let mut v = vector::empty<u64>();
+    v.push_back(1);
+    v.push_back(2);
+    v.push_back(3);
+    
+    let first = v[0];  // 1
+    let len = v.length();  // 3
+    ```
+  </Tab>
+</Tabs>
+
+## Variables and Mutability
+
+```move
+// Immutable by default
+let x = 10;
+// x = 20;  // Error: x is not mutable
+
+// Mutable variable
+let mut y = 10;
+y = 20;  // OK
+
+// Multiple assignment
+let (a, b) = (1, 2);
+
+// Destructuring
+let MyStruct { field1, field2 } = my_struct;
+```
+
+## References
+
+Move uses explicit references:
+
+```move
+public fun update_value(obj: &mut MyObject, new_value: u64) {
+    obj.value = new_value;  // Mutable reference allows modification
+}
+
+public fun read_value(obj: &MyObject): u64 {
+    obj.value  // Immutable reference for reading
+}
+```
+
+<CardGroup cols={2}>
+  <Card title="Immutable Reference" icon="eye">
+    `&T` - Read-only access to value
+  </Card>
+  <Card title="Mutable Reference" icon="pen">
+    `&mut T` - Can modify the value
+  </Card>
+</CardGroup>
+
+<Warning>
+  You cannot have mutable and immutable references to the same value simultaneously. This prevents data races.
+</Warning>
+
+## Control Flow
+
+### Conditionals
+
+```move
+public fun check_value(x: u64): u64 {
+    if (x > 100) {
+        x - 100
+    } else if (x > 50) {
+        x - 50
+    } else {
+        x
+    }
+}
+
+// Expression form
+let result = if (condition) { value1 } else { value2 };
+```
+
+### Loops
+
+```move
+// While loop
+let mut i = 0;
+while (i < 10) {
+    // do something
+    i = i + 1;
+};
+
+// Loop with break
+let mut sum = 0;
+loop {
+    sum = sum + 1;
+    if (sum == 100) break;
+};
+
+// Vector iteration
+let v = vector[1, 2, 3, 4, 5];
+v.do!(|x| {
+    // process x
+});
+```
+
+## Functions
+
+### Function Visibility
+
+```move
+// Private function (default)
+fun internal_function() { /* ... */ }
+
+// Public function
+public fun public_function() { /* ... */ }
+
+// Public function restricted to package
+public(package) fun package_function() { /* ... */ }
+
+// Entry function (callable from transactions)
+entry fun entry_point() { /* ... */ }
+```
+
+### Function Parameters and Return Values
+
+```move
+public fun add(a: u64, b: u64): u64 {
+    a + b
+}
+
+public fun swap(a: u64, b: u64): (u64, u64) {
+    (b, a)  // Return multiple values
+}
+
+public fun maybe_value(x: u64): Option<u64> {
+    if (x > 0) {
+        option::some(x)
+    } else {
+        option::none()
+    }
+}
+```
+
+## Structs
+
+### Defining Structs
+
+```move
+public struct Point has copy, drop {
+    x: u64,
+    y: u64,
+}
+
+public struct MyObject has key, store {
+    id: UID,
+    data: vector<u8>,
+}
+```
+
+### Creating and Using Structs
+
+```move
+public fun create_point(x: u64, y: u64): Point {
+    Point { x, y }
+}
+
+public fun distance_squared(p: &Point): u64 {
+    p.x * p.x + p.y * p.y
+}
+
+public fun move_point(p: &mut Point, dx: u64, dy: u64) {
+    p.x = p.x + dx;
+    p.y = p.y + dy;
+}
+```
+
+## Generics
+
+Move supports generic programming:
+
+```move
+public struct Box<T> has store {
+    value: T,
+}
+
+public fun create_box<T>(value: T): Box<T> {
+    Box { value }
+}
+
+public fun unbox<T>(box: Box<T>): T {
+    let Box { value } = box;
+    value
+}
+
+// Generic with constraints
+public fun wrap_object<T: key + store>(obj: T, ctx: &mut TxContext) {
+    // T must have key and store abilities
+    transfer::public_transfer(obj, ctx.sender());
+}
+```
+
+## Common Patterns
+
+### The Witness Pattern
+
+```move filename="examples/move/coin/sources/my_coin.move"
+public struct MY_COIN has drop {}
+
+fun init(witness: MY_COIN, ctx: &mut TxContext) {
+    let (treasury, metadata) = coin::create_currency(
+        witness,  // One-time witness
+        6,
+        b"MY_COIN",
+        b"",
+        b"",
+        option::none(),
+        ctx,
+    );
+    transfer::public_freeze_object(metadata);
+    transfer::public_transfer(treasury, ctx.sender())
+}
+```
+
+<Accordion title="What is a Witness?">
+  A witness is a struct that proves you own the module it's defined in. The `init` function receives an instance of the witness exactly once, at module publication. This ensures certain operations (like creating a currency) can only happen once.
+</Accordion>
+
+### Capability Pattern
+
+```move
+public struct AdminCap has key, store {
+    id: UID,
+}
+
+fun init(ctx: &mut TxContext) {
+    transfer::transfer(
+        AdminCap { id: object::new(ctx) },
+        ctx.sender()
+    );
+}
+
+public fun admin_only_function(_: &AdminCap, /* other params */) {
+    // Only callable by AdminCap holder
+}
+```
+
+## Error Handling
+
+```move
+// Define error codes
+const EInvalidValue: u64 = 0;
+const EInsufficientBalance: u64 = 1;
+const ENotAuthorized: u64 = 2;
+
+public fun check_value(x: u64) {
+    assert!(x > 0, EInvalidValue);
+    assert!(x < 100, EInvalidValue);
+}
+
+// More descriptive errors (newer syntax)
+#[error]
+const EInvalidInput: vector<u8> = b"Input value must be positive";
+```
+
+## Testing
+
+```move
+#[test_only]
+module my_package::my_module_tests {
+    use sui::test_scenario::{Self as ts};
+    use my_package::my_module::{Self, MyObject};
+
+    #[test]
+    fun test_create() {
+        let mut scenario = ts::begin(@0xA);
+        {
+            my_module::create(100, scenario.ctx());
+        };
+        {
+            scenario.next_tx(@0xA);
+            let obj = scenario.take_from_sender<MyObject>();
+            assert!(my_module::get_value(&obj) == 100, 0);
+            ts::return_to_sender(&scenario, obj);
+        };
+        scenario.end();
+    }
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use descriptive names">
+    ```move
+    // Bad
+    public struct O has key { id: UID, v: u64 }
+    
+    // Good
+    public struct UserProfile has key {
+        id: UID,
+        reputation_score: u64,
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Validate inputs">
+    ```move
+    public fun set_value(obj: &mut MyObject, value: u64) {
+        assert!(value > 0, EInvalidValue);
+        assert!(value <= MAX_VALUE, EInvalidValue);
+        obj.value = value;
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Use constants for magic numbers">
+    ```move
+    const MAX_SUPPLY: u64 = 1_000_000;
+    const DECIMALS: u8 = 6;
+    const PRECISION: u64 = 1_000_000;
+    ```
+  </Accordion>
+  
+  <Accordion title="Document public functions">
+    ```move
+    /// Creates a new game instance with the specified parameters.
+    /// 
+    /// # Arguments
+    /// * `max_players` - Maximum number of players allowed
+    /// * `entry_fee` - Fee in SUI to join the game
+    /// 
+    /// # Aborts
+    /// * `EInvalidMaxPlayers` if max_players is 0
+    public fun create_game(max_players: u64, entry_fee: u64, ctx: &mut TxContext) {
+        assert!(max_players > 0, EInvalidMaxPlayers);
+        // ...
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="Move Modules" href="/concepts/move-modules" icon="cubes">
+    Learn about module organization
+  </Card>
+  <Card title="Move Functions" href="/concepts/move-functions" icon="function">
+    Deep dive into functions
+  </Card>
+  <Card title="Move Abilities" href="/concepts/move-abilities" icon="wand-magic-sparkles">
+    Understand type abilities
+  </Card>
+</CardGroup>

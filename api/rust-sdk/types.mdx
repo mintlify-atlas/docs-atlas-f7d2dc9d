@@ -1,0 +1,409 @@
+---
+title: Common Types
+description: Type reference for the Sui Rust SDK
+---
+
+The Sui Rust SDK provides strongly-typed interfaces through several re-exported crates.
+
+## Type Imports
+
+The SDK re-exports types from multiple crates:
+
+```rust
+use sui_sdk::{
+    types::*,           // sui_types
+    rpc_types::*,       // sui_json_rpc_types
+    json::*,            // sui_json
+    sui_crypto::*,      // sui_crypto (cryptography)
+};
+```
+
+## Base Types
+
+Core types from `sui_types::base_types`:
+
+### ObjectID
+
+32-byte identifier for objects:
+
+```rust
+use sui_types::base_types::ObjectID;
+
+// From hex string
+let obj_id = ObjectID::from_hex_literal("0x5")?;
+
+// From bytes
+let obj_id = ObjectID::from_bytes(&[...])?;
+
+// Random
+let obj_id = ObjectID::random();
+
+// Convert to hex
+let hex = obj_id.to_hex_literal();
+```
+
+### SuiAddress
+
+32-byte address for accounts:
+
+```rust
+use sui_types::base_types::SuiAddress;
+use std::str::FromStr;
+
+// From string
+let addr = SuiAddress::from_str("0x...")?;
+
+// From bytes
+let addr = SuiAddress::from_bytes(&[...])?;
+
+// Random
+let addr = SuiAddress::random_for_testing_only();
+
+// Convert to string
+let s = addr.to_string();
+```
+
+### TransactionDigest
+
+32-byte hash of transaction:
+
+```rust
+use sui_types::base_types::TransactionDigest;
+
+// From base58
+let digest = TransactionDigest::from_str("...")?;
+
+// Convert to base58
+let s = digest.to_string();
+```
+
+### SequenceNumber
+
+Object version number:
+
+```rust
+use sui_types::base_types::SequenceNumber;
+
+// From u64
+let version = SequenceNumber::from(5);
+
+// Get value
+let v: u64 = *version.value();
+```
+
+## RPC Types
+
+Types from `sui_json_rpc_types`:
+
+### SuiObjectData
+
+Object information:
+
+```rust
+use sui_json_rpc_types::SuiObjectData;
+
+pub struct SuiObjectData {
+    pub object_id: ObjectID,
+    pub version: SequenceNumber,
+    pub digest: ObjectDigest,
+    pub type_: Option<String>,
+    pub owner: Option<Owner>,
+    pub previous_transaction: Option<TransactionDigest>,
+    pub storage_rebate: Option<u64>,
+    pub display: Option<DisplayFieldsResponse>,
+    pub content: Option<SuiParsedData>,
+    pub bcs: Option<SuiRawData>,
+}
+```
+
+### SuiObjectDataOptions
+
+Control which fields to fetch:
+
+```rust
+use sui_json_rpc_types::SuiObjectDataOptions;
+
+let options = SuiObjectDataOptions {
+    show_type: true,
+    show_owner: true,
+    show_previous_transaction: true,
+    show_display: false,
+    show_content: true,
+    show_bcs: true,
+    show_storage_rebate: true,
+};
+
+// Builder style
+let options = SuiObjectDataOptions::default()
+    .with_type()
+    .with_owner()
+    .with_content()
+    .with_bcs();
+```
+
+### SuiTransactionBlockResponse
+
+Transaction execution result:
+
+```rust
+use sui_json_rpc_types::SuiTransactionBlockResponse;
+
+pub struct SuiTransactionBlockResponse {
+    pub digest: TransactionDigest,
+    pub transaction: Option<SuiTransactionBlock>,
+    pub raw_transaction: Option<Vec<u8>>,
+    pub effects: Option<SuiTransactionBlockEffects>,
+    pub events: Option<SuiTransactionBlockEvents>,
+    pub object_changes: Option<Vec<ObjectChange>>,
+    pub balance_changes: Option<Vec<BalanceChange>>,
+    pub timestamp_ms: Option<u64>,
+    pub confirmed_local_execution: Option<bool>,
+    pub checkpoint: Option<BigInt<u64>>,
+    pub errors: Vec<String>,
+}
+```
+
+### SuiTransactionBlockResponseOptions
+
+Control which fields to fetch for transactions:
+
+```rust
+use sui_json_rpc_types::SuiTransactionBlockResponseOptions;
+
+let options = SuiTransactionBlockResponseOptions {
+    show_input: true,
+    show_raw_input: false,
+    show_effects: true,
+    show_events: true,
+    show_object_changes: true,
+    show_balance_changes: true,
+    show_raw_effects: false,
+};
+
+// Builder style
+let options = SuiTransactionBlockResponseOptions::default()
+    .with_input()
+    .with_effects()
+    .with_events()
+    .with_object_changes();
+```
+
+### EventFilter
+
+Filter for querying events:
+
+```rust
+use sui_json_rpc_types::EventFilter;
+use sui_types::base_types::{ObjectID, SuiAddress};
+
+// All events
+let filter = EventFilter::All(vec![]);
+
+// By transaction
+let filter = EventFilter::Transaction(digest);
+
+// By Move event type
+let filter = EventFilter::MoveEventType("0x2::coin::CoinCreated".to_string());
+
+// By Move module
+let filter = EventFilter::MoveModule {
+    package: ObjectID::from_hex_literal("0x2")?,
+    module: "coin".to_string(),
+};
+
+// By sender
+let filter = EventFilter::Sender(address);
+
+// Combined filters
+let filter = EventFilter::And(vec![
+    EventFilter::Package(package_id),
+    EventFilter::MoveModule { package: package_id, module: "coin".to_string() },
+]);
+```
+
+### SuiEvent
+
+Event data:
+
+```rust
+use sui_json_rpc_types::SuiEvent;
+
+pub struct SuiEvent {
+    pub id: EventID,
+    pub package_id: ObjectID,
+    pub transaction_module: Identifier,
+    pub sender: SuiAddress,
+    pub type_: StructTag,
+    pub parsed_json: Value,
+    pub bcs: Vec<u8>,
+    pub timestamp_ms: Option<u64>,
+}
+```
+
+## Transaction Types
+
+Types from `sui_types::transaction`:
+
+### TransactionData
+
+Unsigned transaction:
+
+```rust
+use sui_types::transaction::TransactionData;
+use sui_types::programmable_transaction_builder::ProgrammableTransactionBuilder;
+
+let mut ptb = ProgrammableTransactionBuilder::new();
+// ... build transaction ...
+let pt = ptb.finish();
+
+let tx_data = TransactionData::new_programmable(
+    sender,
+    vec![gas_payment],
+    pt,
+    gas_budget,
+    gas_price,
+);
+```
+
+### Transaction
+
+Signed transaction:
+
+```rust
+use sui_types::transaction::Transaction;
+use sui_types::crypto::Signature;
+
+let tx = Transaction::from_data(tx_data, vec![signature]);
+
+// Get digest
+let digest = tx.digest();
+
+// Verify signatures
+tx.verify_signatures_authenticated(&epoch_store)?;
+```
+
+## Cryptography Types
+
+Types from `sui_crypto`:
+
+### SuiKeyPair
+
+Key pair for signing:
+
+```rust
+use sui_types::crypto::{SuiKeyPair, SuiSignatureScheme};
+
+// Generate new keypair
+let keypair = SuiKeyPair::Ed25519(/* ... */);
+
+// Get public key
+let pubkey = keypair.public();
+
+// Get address
+let address = SuiAddress::from(&pubkey);
+```
+
+### Signature
+
+Transaction signature:
+
+```rust
+use sui_types::crypto::{Signature, Intent, IntentMessage};
+
+// Sign transaction
+let intent_msg = IntentMessage::new(
+    Intent::sui_transaction(),
+    tx_data,
+);
+
+let signature = Signature::new_secure(&intent_msg, &keypair);
+```
+
+## Move Types
+
+Types from `move_core_types`:
+
+### TypeTag
+
+Move type representation:
+
+```rust
+use move_core_types::language_storage::TypeTag;
+
+// Parse from string
+let type_tag: TypeTag = "0x2::sui::SUI".parse()?;
+
+// Struct type
+use move_core_types::language_storage::StructTag;
+let struct_tag = StructTag {
+    address: AccountAddress::from_hex_literal("0x2")?,
+    module: Identifier::new("coin")?,
+    name: Identifier::new("Coin")?,
+    type_params: vec![TypeTag::Struct(Box::new(/* SUI type */))],
+};
+```
+
+### Identifier
+
+Move identifier:
+
+```rust
+use move_core_types::identifier::Identifier;
+
+// Create identifier
+let module = Identifier::new("coin")?;
+let function = Identifier::new("transfer")?;
+```
+
+## Utility Types
+
+### BigInt
+
+Wrapper for large integers in JSON:
+
+```rust
+use sui_types::sui_serde::BigInt;
+
+// Create from u64
+let big_int = BigInt::from(1000000u64);
+
+// Get value
+let value: u64 = *big_int;
+```
+
+### Owner
+
+Object ownership:
+
+```rust
+use sui_types::base_types::Owner;
+
+match owner {
+    Owner::AddressOwner(addr) => println!("Owned by {}", addr),
+    Owner::ObjectOwner(obj_id) => println!("Owned by object {}", obj_id),
+    Owner::Shared { initial_shared_version } => println!("Shared object"),
+    Owner::Immutable => println!("Immutable object"),
+}
+```
+
+## Type Conversions
+
+Common conversions:
+
+```rust
+// String to ObjectID
+let obj_id = ObjectID::from_hex_literal("0x5")?;
+let obj_id: ObjectID = "0x5".parse()?;
+
+// String to SuiAddress
+use std::str::FromStr;
+let addr = SuiAddress::from_str("0x...")?;
+
+// Bytes to ObjectID/SuiAddress
+let obj_id = ObjectID::from_bytes(&bytes)?;
+let addr = SuiAddress::from_bytes(&bytes)?;
+
+// To hex string
+let hex = obj_id.to_hex_literal();
+let hex = addr.to_string();
+```

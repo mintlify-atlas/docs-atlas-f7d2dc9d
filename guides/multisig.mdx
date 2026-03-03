@@ -1,0 +1,97 @@
+---
+title: Multisig Transactions
+description: Create and execute multi-signature transactions on Sui
+---
+
+Multisig allows multiple parties to jointly control assets, requiring M-of-N signatures to execute transactions.
+
+## Creating Multisig Address
+
+### TypeScript
+
+```typescript
+import { MultiSigPublicKey } from '@mysten/sui/multisig';
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
+
+// Create keypairs for participants
+const keypair1 = new Ed25519Keypair();
+const keypair2 = new Ed25519Keypair();
+const keypair3 = new Ed25519Keypair();
+
+// Create 2-of-3 multisig
+const multisigPublicKey = MultiSigPublicKey.fromPublicKeys({
+  threshold: 2,
+  publicKeys: [
+    { publicKey: keypair1.getPublicKey(), weight: 1 },
+    { publicKey: keypair2.getPublicKey(), weight: 1 },
+    { publicKey: keypair3.getPublicKey(), weight: 1 },
+  ],
+});
+
+const multisigAddress = multisigPublicKey.toSuiAddress();
+console.log('Multisig address:', multisigAddress);
+```
+
+## Signing Transactions
+
+### Collect signatures
+
+```typescript
+import { Transaction } from '@mysten/sui/transactions';
+
+const tx = new Transaction();
+tx.transferObjects([tx.splitCoins(tx.gas, [1000000])], recipient);
+tx.setSender(multisigAddress);
+
+// Build transaction
+const txBytes = await tx.build({ client });
+
+// Each participant signs
+const sig1 = await keypair1.signTransaction(txBytes);
+const sig2 = await keypair2.signTransaction(txBytes);
+
+// Combine signatures
+const combinedSignature = multisigPublicKey.combinePartialSignatures([
+  sig1.signature,
+  sig2.signature,
+]);
+
+// Execute with multisig
+const result = await client.executeTransactionBlock({
+  transactionBlock: txBytes,
+  signature: combinedSignature,
+});
+```
+
+## Weighted Multisig
+
+```typescript
+// 3-of-5 with weighted keys
+const multisigPublicKey = MultiSigPublicKey.fromPublicKeys({
+  threshold: 3,
+  publicKeys: [
+    { publicKey: adminKey, weight: 2 },   // Admin has 2 votes
+    { publicKey: member1Key, weight: 1 },
+    { publicKey: member2Key, weight: 1 },
+    { publicKey: member3Key, weight: 1 },
+  ],
+});
+```
+
+## Use Cases
+
+- **Treasury management**: Require multiple approvals
+- **DAOs**: Governance decisions
+- **Custody solutions**: Institutional asset management
+- **Escrow**: Multi-party agreements
+
+## Best Practices
+
+1. Store participant keys securely
+2. Distribute keys across parties
+3. Document threshold requirements clearly
+4. Test signature collection flow
+
+## Learn More
+
+- [Sui multisig guide](https://docs.sui.io/concepts/cryptography/transaction-auth/multisig)

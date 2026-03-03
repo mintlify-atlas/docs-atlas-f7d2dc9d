@@ -1,0 +1,398 @@
+---
+title: Validator Requirements
+description: Detailed requirements and qualifications for running a Sui validator, including hardware, stake, and operational standards.
+---
+
+Running a validator on Sui requires meeting specific technical, financial, and operational requirements. This guide covers all prerequisites.
+
+## Technical Requirements
+
+See [System Requirements](/operators/system-requirements) for detailed hardware specifications.
+
+### Minimum Hardware
+
+- **CPU**: 24 physical cores (48 virtual cores)
+- **Memory**: 128 GB RAM
+- **Storage**: 4 TB NVMe SSD
+- **Network**: 1 Gbps bandwidth, less than 100ms latency to other validators
+
+### Recommended Hardware
+
+- **CPU**: 48+ physical cores
+- **Memory**: 256 GB RAM
+- **Storage**: 8 TB+ NVMe SSD with high IOPS
+- **Network**: 10 Gbps bandwidth, redundant connections
+
+## Staking Requirements
+
+### Minimum Stake
+
+To join the validator set, you must have:
+
+```bash
+# Check minimum stake requirement
+sui client call --package 0x3 --module sui_system --function get_min_validator_stake --args 0x5
+```
+
+As of the latest network state:
+- **Mainnet**: ~30 million SUI minimum
+- **Testnet**: ~1 million SUI minimum
+
+These values may change based on network governance.
+
+### Stake Sources
+
+Validators can receive stake from:
+
+1. **Self-stake**: Validator's own SUI
+2. **Delegated stake**: SUI delegated by token holders
+3. **Combined**: Mix of self-stake and delegation
+
+<Note>
+  Validators must maintain minimum stake to remain in the active set. Falling below the threshold results in removal from the committee.
+</Note>
+
+## Network Requirements
+
+### Connectivity
+
+Validators must maintain reliable network connectivity:
+
+- **Uptime**: 99.9%+ availability
+- **Latency**: Less than 100ms to other validators (lower is better)
+- **Bandwidth**: Sustained 1 Gbps minimum
+- **Packet loss**: Less than 0.1%
+
+### Required Ports
+
+All ports must be publicly accessible:
+
+| Port | Protocol | Purpose |
+|------|----------|----------|
+| 8080 | TCP | Protocol/transaction interface |
+| 8081 | TCP/UDP | Consensus interface |
+| 8082 | UDP | Narwhal worker |
+| 8084 | UDP | P2P state sync |
+| 8443 | TCP | Metrics push (outbound) |
+
+### Network Architecture
+
+**Production Setup**:
+```
+┌─────────────────┐
+│  Load Balancer  │
+└────────┬────────┘
+         │
+    ┌────┴────┐
+    │ Primary │ (Validator)
+    │  Node   │
+    └────┬────┘
+         │
+    ┌────┴────┐
+    │ Backup  │ (Hot standby)
+    │  Node   │
+    └─────────┘
+```
+
+## Operational Requirements
+
+### Key Management
+
+Secure management of four key pairs:
+
+1. **Protocol Key** (BLS12381): Most critical, signs consensus messages
+2. **Account Key** (Ed25519): Controls validator account and staked funds
+3. **Network Key** (Ed25519): P2P networking authentication
+4. **Worker Key** (Ed25519): Narwhal worker authentication
+
+**Security Requirements**:
+- Store protocol and account keys in HSM or secure offline storage
+- Never expose private keys in version control or logs
+- Implement key rotation procedures
+- Maintain encrypted backups of all keys
+
+### Monitoring and Alerting
+
+Validators must maintain:
+
+- **24/7 monitoring** of node health and performance
+- **Automated alerts** for:
+  - Node downtime
+  - High sync lag (>100 checkpoints)
+  - Low peer connectivity (less than 3 peers)
+  - High error rates
+  - Disk space warnings
+  - Abnormal resource usage
+
+### Operational Expertise
+
+Validator operators should have:
+
+- Linux system administration experience
+- Understanding of blockchain consensus mechanisms
+- Experience with high-availability infrastructure
+- Incident response procedures
+- Security best practices
+
+## Performance Standards
+
+### Availability
+
+Validators are expected to maintain:
+
+- **Uptime**: >99.5% (maximum ~3.6 hours downtime per month)
+- **Response time**: Participate in >99% of consensus rounds
+- **Sync lag**: Stay within 100 checkpoints of network head
+
+### Penalties for Poor Performance
+
+Validators may face:
+
+- **Reduced rewards** for missed consensus participation
+- **Slashing** if reported by 2f+1 validators for byzantine behavior
+- **Removal from active set** if stake falls below minimum
+
+## Commission Structure
+
+### Setting Commission Rate
+
+Validators earn rewards and charge a commission on delegated stake:
+
+```bash
+# Set commission rate (in basis points, 200 = 2%)
+sui validator update-metadata --commission-rate 200
+```
+
+**Default**: 2% (200 basis points)
+**Range**: 0-100% (0-10000 basis points)
+
+### Commission Considerations
+
+- **Competitive rates**: Most validators charge 2-10%
+- **Market dynamics**: Lower rates attract more delegation
+- **Operational costs**: Ensure commission covers infrastructure costs
+- **Reputation**: Balance between profitability and competitiveness
+
+## Registration Process
+
+### Step 1: Generate Validator Info
+
+```bash
+sui validator make-validator-info \
+  "Validator Name" \
+  "Description of validator" \
+  "https://example.com/logo.png" \
+  "https://example.com" \
+  "validator.example.com" \
+  1000  # gas price
+```
+
+This creates `validator.info` with:
+- Validator metadata
+- Public keys
+- Network addresses
+- Initial gas price
+
+### Step 2: Become Candidate
+
+```bash
+sui validator become-candidate validator.info
+```
+
+This submits an on-chain transaction to register as a validator candidate.
+
+### Step 3: Accumulate Stake
+
+As a candidate:
+- Accept self-stake and delegations
+- Must reach minimum stake threshold
+- Typically takes time to build reputation and attract delegation
+
+### Step 4: Join Committee
+
+Once minimum stake is reached:
+
+```bash
+sui validator join-committee
+```
+
+You will become active in the next epoch (24 hours on mainnet).
+
+## Pre-Launch Checklist
+
+Before joining the active validator set:
+
+### Infrastructure
+- [ ] Hardware meets or exceeds minimum requirements
+- [ ] NVMe SSD storage with sufficient capacity
+- [ ] Network connectivity tested (bandwidth, latency, packet loss)
+- [ ] All required ports open and accessible
+- [ ] Firewall configured correctly
+- [ ] DDoS protection in place
+
+### Software
+- [ ] Latest sui-node binary installed
+- [ ] Configuration file validated
+- [ ] Genesis blob downloaded and verified
+- [ ] All key pairs generated and secured
+- [ ] Node fully synced with network
+
+### Monitoring
+- [ ] Metrics collection configured (Prometheus)
+- [ ] Dashboards set up (Grafana)
+- [ ] Alerting configured and tested
+- [ ] Log aggregation in place
+- [ ] Backup and recovery procedures tested
+
+### Operations
+- [ ] Incident response procedures documented
+- [ ] On-call rotation established (if team)
+- [ ] Communication channels set up (Discord, etc.)
+- [ ] Update procedures documented
+- [ ] Disaster recovery plan tested
+
+### Security
+- [ ] Keys stored securely (HSM or encrypted offline)
+- [ ] Access controls implemented
+- [ ] SSH keys configured (no password auth)
+- [ ] System hardening completed
+- [ ] Security monitoring enabled
+- [ ] Backup encryption configured
+
+## Ongoing Responsibilities
+
+### Daily Operations
+
+- Monitor node health and performance
+- Check for security updates
+- Review metrics and logs
+- Respond to alerts
+- Check validator ranking and stake
+
+### Weekly Tasks
+
+- Review performance metrics
+- Analyze error rates and patterns
+- Check backup completion
+- Test disaster recovery procedures
+- Review security logs
+
+### Monthly Tasks
+
+- Capacity planning review
+- Cost analysis
+- Update documentation
+- Security audit
+- Community engagement
+
+### As Needed
+
+- **Software updates**: Apply within 24-48 hours of release
+- **Emergency patches**: Apply immediately
+- **Governance participation**: Vote on proposals
+- **Metadata updates**: Keep validator info current
+- **Commission adjustments**: Based on market conditions
+
+## Financial Considerations
+
+### Operating Costs
+
+Monthly expenses (estimated):
+
+**Infrastructure**:
+- Dedicated server: $1,000-2,000
+- Cloud hosting: $2,000-4,000
+- Bandwidth: $100-500
+- Monitoring services: $50-200
+
+**Personnel**:
+- Operator time: $2,000-10,000 (depending on setup)
+- On-call coverage: $1,000-5,000
+
+**Other**:
+- Backup storage: $100-500
+- Security services: $100-1,000
+
+**Total**: $4,350-23,200/month
+
+### Revenue Model
+
+**Sources**:
+- Commission on delegated stake
+- Staking rewards on self-stake
+
+**Example** (simplified):
+```
+Total stake: 50M SUI
+Self-stake: 5M SUI (10%)
+Delegated: 45M SUI (90%)
+Commission: 5%
+Annual staking rewards: 3% of stake
+
+Validator earnings:
+- Self-stake rewards: 5M * 3% = 150,000 SUI
+- Commission: 45M * 3% * 5% = 67,500 SUI
+- Total: 217,500 SUI/year
+```
+
+<Note>
+  Actual rewards vary based on network participation, performance, and validator voting power.
+</Note>
+
+## Delegation Best Practices
+
+### Attracting Delegators
+
+1. **Reliability**: Maintain high uptime and performance
+2. **Competitive commission**: Balance profitability with attractiveness
+3. **Transparency**: Publish regular performance reports
+4. **Communication**: Maintain active presence in community
+5. **Professional setup**: Well-maintained website and social presence
+
+### Delegator Communication
+
+Maintain transparency with delegators:
+
+- Announce planned maintenance in advance
+- Publish monthly performance reports
+- Notify of commission rate changes
+- Explain any incidents or downtime
+- Share validator roadmap and improvements
+
+## Compliance and Legal
+
+### Regulatory Considerations
+
+- Understand local regulations for operating blockchain infrastructure
+- Consider business entity formation
+- Maintain accurate financial records
+- Consult with legal and tax professionals
+- Implement KYC/AML if required by jurisdiction
+
+### Terms of Service
+
+Consider publishing:
+- Validator terms of service
+- Privacy policy
+- Slashing policy
+- Commission change policy
+
+## Resources
+
+### Documentation
+
+- [Sui Documentation](https://docs.sui.io)
+- [Validator Operations Guide](/operators/validator-operations)
+- [Staking and Rewards](/operators/staking-rewards)
+
+### Community
+
+- [Sui Discord](https://discord.gg/sui) - #validators channel
+- [Sui Forum](https://forums.sui.io)
+- [GitHub](https://github.com/MystenLabs/sui)
+
+### Tools
+
+- [Sui Explorer](https://suiscan.xyz)
+- [SuiVision](https://suivision.xyz)
+- [Validator Dashboards](https://metrics.sui.io)

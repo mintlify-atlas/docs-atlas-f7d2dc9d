@@ -1,0 +1,235 @@
+---
+title: CLI Installation
+description: How to install the Sui command-line interface
+---
+
+This guide covers installation methods for the Sui CLI.
+
+## Prerequisites
+
+- **Rust**: Version 1.75.0 or later
+- **Git**: For cloning the repository
+- **System dependencies**: Build tools for your platform
+
+### Platform-Specific Dependencies
+
+<Tabs>
+  <Tab title="macOS">
+    ```bash
+    # Install Homebrew if not already installed
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    
+    # Install dependencies
+    brew install curl cmake git
+    ```
+  </Tab>
+  
+  <Tab title="Linux (Ubuntu/Debian)">
+    ```bash
+    sudo apt-get update
+    sudo apt-get install -y curl git cmake build-essential libssl-dev pkg-config
+    ```
+  </Tab>
+  
+  <Tab title="Linux (Fedora/RHEL)">
+    ```bash
+    sudo dnf install -y curl git cmake gcc gcc-c++ openssl-devel
+    ```
+  </Tab>
+</Tabs>
+
+## Install Rust
+
+If you don't have Rust installed:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
+```
+
+Verify installation:
+
+```bash
+rustc --version
+cargo --version
+```
+
+## Installation Methods
+
+### Method 1: Install from Crates.io (Recommended)
+
+Install the latest stable release from crates.io:
+
+```bash
+cargo install --locked sui
+```
+
+This installs the `sui` binary to `~/.cargo/bin/`.
+
+### Method 2: Build from Source
+
+For the latest development version:
+
+```bash
+# Clone the repository
+git clone https://github.com/MystenLabs/sui.git
+cd sui
+
+# Checkout the latest release tag (optional)
+git checkout <version-tag>
+
+# Build and install
+cargo install --locked --path crates/sui
+```
+
+### Method 3: Install Specific Version
+
+To install a specific version:
+
+```bash
+cargo install --locked sui --version <version>
+```
+
+## Verify Installation
+
+Check that the CLI is installed correctly:
+
+```bash
+sui --version
+```
+
+You should see output like:
+
+```
+sui 1.x.x
+```
+
+## First-Time Setup
+
+After installation, initialize the Sui client:
+
+```bash
+sui client
+```
+
+This creates the default configuration directory at `~/.sui/sui_config/` and prompts you to:
+
+1. Select a network environment (mainnet, testnet, devnet, or local)
+2. Generate a new keypair
+
+### Manual Configuration
+
+To set up without prompts:
+
+```bash
+# Accept defaults
+sui client --yes
+
+# Or specify environment and config path
+sui client --client.env testnet --client.config /path/to/config
+```
+
+## Network Environments
+
+Add network environments:
+
+```bash
+# Add mainnet
+sui client new-env --alias mainnet --rpc https://fullnode.mainnet.sui.io:443
+
+# Add testnet
+sui client new-env --alias testnet --rpc https://fullnode.testnet.sui.io:443
+
+# Add devnet
+sui client new-env --alias devnet --rpc https://fullnode.devnet.sui.io:443
+
+# Add local network
+sui client new-env --alias local --rpc http://127.0.0.1:9000
+
+# Switch to an environment
+sui client switch --env testnet
+```
+
+## Update the CLI
+
+### From Crates.io
+
+```bash
+cargo install --locked --force sui
+```
+
+### From Source
+
+```bash
+cd sui
+git pull
+git checkout <new-version-tag>
+cargo install --locked --force --path crates/sui
+```
+
+## Uninstall
+
+To remove the Sui CLI:
+
+```bash
+cargo uninstall sui
+```
+
+To remove configuration and data:
+
+```bash
+rm -rf ~/.sui
+```
+
+## Troubleshooting
+
+### Command Not Found
+
+If `sui` command is not found, ensure `~/.cargo/bin` is in your PATH:
+
+```bash
+echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+For zsh:
+
+```bash
+echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+### Build Failures
+
+1. Ensure Rust is up to date:
+   ```bash
+   rustup update stable
+   ```
+
+2. Clean build artifacts:
+   ```bash
+   cargo clean
+   ```
+
+3. Retry installation with verbose output:
+   ```bash
+   cargo install --locked sui --verbose
+   ```
+
+### OpenSSL Errors (Linux)
+
+If you encounter OpenSSL-related errors:
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install libssl-dev pkg-config
+
+# Fedora/RHEL
+sudo dnf install openssl-devel
+```
+
+## Next Steps
+
+- Create your first address: [sui client new-address](./client#new-address)
+- Build a Move package: [sui move](./move)
+- Start a local network: [sui start](./start)
